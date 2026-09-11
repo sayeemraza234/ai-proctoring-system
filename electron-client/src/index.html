@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ProctorAI — Secure Exam Terminal</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ─── SCREEN 1: LOGIN ─────────────────────────────────────────────── -->
+<div id="screen-login" class="screen active">
+    <div class="login-bg">
+        <div class="login-card">
+            <div class="logo-ring">
+                <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+                    <circle cx="24" cy="24" r="22" stroke="#F59E0B" stroke-width="2.5"/>
+                    <path d="M24 12L28 20H36L30 25L32 33L24 28L16 33L18 25L12 20H20L24 12Z" fill="#F59E0B"/>
+                </svg>
+            </div>
+            <h1>ProctorAI</h1>
+            <p class="subtitle">Secure Examination Terminal</p>
+
+            <div id="login-error" class="error-banner hidden"></div>
+
+            <div class="field">
+                <label>Username</label>
+                <input id="login-username" type="text" placeholder="Enter your username" autocomplete="off" spellcheck="false">
+            </div>
+            <div class="field">
+                <label>Password</label>
+                <input id="login-password" type="password" placeholder="Enter your password">
+            </div>
+            <button id="login-btn" class="btn-primary" onclick="doLogin()">
+                <span id="login-btn-text">Enter Exam Portal</span>
+                <span id="login-spinner" class="spinner hidden"></span>
+            </button>
+
+            <p class="login-note">🔒 This is a secure, monitored environment. All activity is recorded.</p>
+        </div>
+    </div>
+</div>
+
+<!-- ─── SCREEN 2: SYSTEM CHECK ─────────────────────────────────────── -->
+<div id="screen-syscheck" class="screen">
+    <div class="syscheck-layout">
+        <!-- Left: Camera Preview -->
+        <div class="camera-panel">
+            <div class="camera-frame">
+                <video id="cam-preview" autoplay muted playsinline></video>
+                <div class="cam-overlay">
+                    <div class="cam-dot"></div>
+                    <span>AI Proctoring Active</span>
+                </div>
+                <div class="face-guide"></div>
+            </div>
+            <p class="cam-hint">Position your face clearly in the frame</p>
+        </div>
+
+        <!-- Right: Checks + Info -->
+        <div class="checks-panel">
+            <div class="welcome-badge">
+                <svg width="20" height="20" viewBox="0 0 48 48" fill="none"><circle cx="24" cy="24" r="22" stroke="#F59E0B" stroke-width="2.5"/><path d="M24 12L28 20H36L30 25L32 33L24 28L16 33L18 25L12 20H20L24 12Z" fill="#F59E0B"/></svg>
+                Welcome, <span id="candidate-name">Candidate</span>
+            </div>
+            <h2>System Check</h2>
+            <p class="sub">Verifying your environment before the exam begins</p>
+
+            <div class="checks-list">
+                <div class="check-item" id="check-camera">
+                    <div class="check-icon pending">⏳</div>
+                    <div class="check-info">
+                        <div class="check-title">Webcam / Camera</div>
+                        <div class="check-desc" id="check-camera-desc">Initializing...</div>
+                    </div>
+                </div>
+                <div class="check-item" id="check-backend">
+                    <div class="check-icon pending">⏳</div>
+                    <div class="check-info">
+                        <div class="check-title">Backend Connection</div>
+                        <div class="check-desc" id="check-backend-desc">Connecting to servers...</div>
+                    </div>
+                </div>
+                <div class="check-item" id="check-interview">
+                    <div class="check-icon pending">⏳</div>
+                    <div class="check-info">
+                        <div class="check-title">Interview Session</div>
+                        <div class="check-desc" id="check-interview-desc">Loading your exam...</div>
+                    </div>
+                </div>
+                <div class="check-item" id="check-kiosk">
+                    <div class="check-icon pending">⏳</div>
+                    <div class="check-info">
+                        <div class="check-title">Secure Mode</div>
+                        <div class="check-desc" id="check-kiosk-desc">Ready to lock screen...</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="exam-info" id="exam-info-box" style="display:none">
+                <div class="exam-info-row"><span>Role</span><strong id="info-role">—</strong></div>
+                <div class="exam-info-row"><span>Questions</span><strong id="info-qcount">—</strong></div>
+                <div class="exam-info-row"><span>Duration</span><strong id="info-duration">—</strong></div>
+            </div>
+
+            <div class="rules-box">
+                <div class="rules-title">⚠ Exam Rules</div>
+                <ul>
+                    <li>No tab switching or window switching allowed</li>
+                    <li>No copy/paste — all keyboard shortcuts are disabled</li>
+                    <li>Keep your face visible in the camera at all times</li>
+                    <li>The exam screen cannot be minimized or closed</li>
+                    <li>Click <strong>End Interview</strong> when you are done</li>
+                </ul>
+            </div>
+
+            <button id="start-exam-btn" class="btn-primary disabled" disabled onclick="beginExam()">
+                🔒 Lock Screen & Begin Exam
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- ─── SCREEN 3: EXAM (KIOSK) ─────────────────────────────────────── -->
+<div id="screen-exam" class="screen">
+    <!-- Top Bar -->
+    <div class="exam-topbar">
+        <div class="topbar-left">
+            <div class="proctor-logo">
+                <svg width="22" height="22" viewBox="0 0 48 48" fill="none"><circle cx="24" cy="24" r="22" stroke="#F59E0B" stroke-width="2.5"/><path d="M24 12L28 20H36L30 25L32 33L24 28L16 33L18 25L12 20H20L24 12Z" fill="#F59E0B"/></svg>
+                ProctorAI
+            </div>
+            <div class="proctor-badge">SECURE EXAM MODE</div>
+        </div>
+        <div class="topbar-center">
+            <div class="exam-timer" id="exam-timer">00:00:00</div>
+        </div>
+        <div class="topbar-right">
+            <div class="trust-meter">
+                <span class="trust-label">Trust Score</span>
+                <span class="trust-val" id="trust-display">100</span>
+            </div>
+            <div class="cam-thumb-wrap">
+                <video id="cam-thumb" autoplay muted playsinline></video>
+                <div class="cam-rec-dot"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Anomaly Banner -->
+    <div id="anomaly-banner" class="anomaly-banner hidden">
+        <span id="anomaly-text">⚠ Suspicious activity detected</span>
+    </div>
+
+    <!-- Strict Malpractice Alert Dialog Box -->
+    <div id="proctor-alert-dialog" class="proctor-alert-dialog hidden">
+        <div class="alert-dialog-card">
+            <div class="alert-dialog-header">
+                <span class="alert-dialog-badge">🚨 PROCTORING VIOLATION FLAGGED</span>
+                <span id="alert-dialog-time" class="alert-dialog-time"></span>
+            </div>
+            <div id="alert-dialog-title" class="alert-dialog-title">FACE NOT DETECTED IN CAMERA</div>
+            <p id="alert-dialog-desc" class="alert-dialog-desc">
+                Your face must be clearly visible and looking forward at all times. This violation was logged and broadcasted to your interviewer immediately.
+            </p>
+            <div class="alert-dialog-meta">
+                <span>Trust Score Penalty: <strong id="alert-dialog-penalty">-10 pts</strong></span>
+                <span>Remaining Trust: <strong id="alert-dialog-score">90</strong></span>
+            </div>
+            <button class="alert-dialog-btn" onclick="dismissAlertDialog()">I Acknowledge & Return to Exam</button>
+        </div>
+    </div>
+
+    <!-- Offscreen vision canvas -->
+    <canvas id="vision-canvas" width="320" height="240" style="display:none;"></canvas>
+
+    <!-- Main Exam Layout -->
+    <div class="exam-body">
+        <!-- Left: Questions Nav -->
+        <div class="q-nav" id="q-nav"></div>
+
+        <!-- Center: Question + Answer -->
+        <div class="exam-center">
+            <div class="question-card">
+                <div class="q-header">
+                    <span class="q-number" id="q-number">Q1</span>
+                    <span class="q-badge" id="q-difficulty">Medium</span>
+                    <span class="q-topic" id="q-topic">Arrays</span>
+                </div>
+                <h3 id="q-title">Loading question...</h3>
+                <p id="q-description" class="q-desc">Please wait while your exam loads.</p>
+
+                <!-- MCQ options (shown for MCQ questions) -->
+                <div id="mcq-options" class="mcq-options hidden"></div>
+
+                <!-- Code Editor (shown for coding questions) -->
+                <div id="code-section" class="code-section hidden">
+                    <div class="code-toolbar">
+                        <span class="code-lang" id="code-lang-label">JavaScript</span>
+                        <button class="btn-run" onclick="runCode()">▶ Run Code</button>
+                    </div>
+                    <textarea id="code-editor" class="code-editor" placeholder="Write your solution here..." spellcheck="false" autocorrect="off" autocapitalize="off"></textarea>
+                    <div id="code-output" class="code-output hidden">
+                        <div class="output-header">Output</div>
+                        <pre id="output-text"></pre>
+                    </div>
+                </div>
+
+                <!-- Text / System design answer -->
+                <div id="text-section" class="text-section hidden">
+                    <textarea id="text-answer" class="text-editor" placeholder="Write your detailed answer here..." spellcheck="false"></textarea>
+                </div>
+            </div>
+
+            <!-- Navigation -->
+            <div class="exam-nav">
+                <button class="btn-nav" onclick="prevQuestion()">← Previous</button>
+                <div class="q-progress">
+                    <span id="q-progress-text">1 / 1</span>
+                    <div class="progress-bar"><div id="progress-fill" class="progress-fill"></div></div>
+                </div>
+                <button class="btn-nav" onclick="nextQuestion()">Next →</button>
+            </div>
+        </div>
+
+        <!-- Right: Proctoring Panel -->
+        <div class="proctor-panel">
+            <!-- Interviewer Live Feed -->
+            <div class="interviewer-video-wrap">
+                <video id="interviewer-video" autoplay playsinline></video>
+                <div id="interviewer-placeholder" class="interviewer-placeholder">
+                    <div class="interviewer-icon">👤</div>
+                    <span>Connecting Interviewer...</span>
+                </div>
+                <div class="video-label">INTERVIEWER</div>
+            </div>
+
+            <div class="cam-large-wrap">
+                <video id="cam-large" autoplay muted playsinline></video>
+                <div class="cam-status-bar">
+                    <div class="rec-indicator"><div class="rec-dot"></div> REC</div>
+                    <span id="proctor-status">Monitoring</span>
+                </div>
+            </div>
+
+            <div class="anomaly-log" id="anomaly-log">
+                <div class="log-title">Proctoring Log</div>
+                <div id="log-entries" class="log-entries">
+                    <div class="log-entry info">Session started</div>
+                </div>
+            </div>
+
+            <button class="btn-end" onclick="confirmEndInterview()">
+                🏁 End Interview
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- ─── END CONFIRM MODAL ───────────────────────────────────────────── -->
+<div id="modal-end" class="modal hidden">
+    <div class="modal-box">
+        <div class="modal-icon">🏁</div>
+        <h3>Submit & End Interview?</h3>
+        <p>All your answers will be saved and submitted for evaluation. This action cannot be undone.</p>
+        <div class="modal-actions">
+            <button class="btn-cancel" onclick="closeModal()">Continue Exam</button>
+            <button class="btn-confirm" onclick="submitAndEnd()">Submit & End</button>
+        </div>
+    </div>
+</div>
+
+<!-- ─── SUBMISSION SCREEN ───────────────────────────────────────────── -->
+<div id="screen-done" class="screen">
+    <div class="done-card">
+        <div class="done-icon">✅</div>
+        <h2>Interview Submitted</h2>
+        <p>Your answers have been saved. The interviewer will review and contact you shortly.</p>
+        <p class="done-sub">This window will close automatically in <span id="close-countdown">5</span> seconds.</p>
+    </div>
+</div>
+
+<script src="http://localhost:5000/socket.io/socket.io.js"></script>
+<script>
+  // Load simple-peer: try local node_modules first, then CDN fallback
+  (function() {
+    var localPath = '../node_modules/simple-peer/simplepeer.min.js';
+    var cdnPath = 'https://cdn.jsdelivr.net/npm/simple-peer@9.11.1/simplepeer.min.js';
+    var s = document.createElement('script');
+    s.src = localPath;
+    s.onerror = function() {
+      console.warn('[SimplePeer] Local file not found, loading from CDN...');
+      var s2 = document.createElement('script');
+      s2.src = cdnPath;
+      document.head.appendChild(s2);
+    };
+    document.head.appendChild(s);
+  })();
+</script>
+<script src="renderer.js"></script>
+</body>
+</html>
