@@ -16,10 +16,11 @@ import ReportView from './components/ReportView';
 import { io } from 'socket.io-client';
 
 const BACKEND = (() => {
+  if (import.meta.env.VITE_BACKEND_URL) return import.meta.env.VITE_BACKEND_URL;
   const host = window.location.hostname;
   if (host === 'localhost' || host === '127.0.0.1') return 'http://127.0.0.1:5000';
   if (host.includes('loca.lt')) return `https://${host.replace('.loca.lt', '-api.loca.lt')}`;
-  return 'http://127.0.0.1:5000';
+  return 'https://ai-proctoring-system-8nma.onrender.com';
 })();
 
 // ── Utilities ────────────────────────────────────────────────────────────────

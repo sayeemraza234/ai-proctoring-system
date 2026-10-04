@@ -9,11 +9,12 @@ import {
   ChevronDown, ChevronUp, X, CheckCircle, Sparkles, Shield
 } from 'lucide-react';
 
-const BACKEND = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-  ? 'http://127.0.0.1:5000'
-  : (window.location.hostname.includes('loca.lt')
-      ? `https://${window.location.hostname.replace('.loca.lt', '-api.loca.lt')}`
-      : 'http://127.0.0.1:5000');
+const BACKEND = import.meta.env.VITE_BACKEND_URL
+  || (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+      ? 'http://127.0.0.1:5000'
+      : (window.location.hostname.includes('loca.lt')
+          ? `https://${window.location.hostname.replace('.loca.lt', '-api.loca.lt')}`
+          : 'https://ai-proctoring-system-8nma.onrender.com'));
 
 function TrustIndicator({ score }) {
   const color = score >= 80 ? 'var(--success)' : score >= 50 ? 'var(--warning)' : 'var(--danger)';
