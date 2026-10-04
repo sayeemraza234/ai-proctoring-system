@@ -1,38 +1,41 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { io } from 'socket.io-client';
-import { AlertCircle, EyeOff, Users, Monitor, Maximize, Shield, ShieldAlert, ShieldCheck, Clock, TrendingDown, BarChart2, Activity } from 'lucide-react';
+import {
+  AlertCircle, ShieldCheck, ShieldAlert, Activity,
+  Eye, Monitor, Users, Volume2, Send, Check
+} from 'lucide-react';
 
 const BACKEND = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
   ? 'http://127.0.0.1:5000'
   : (window.location.hostname.includes('loca.lt')
       ? `https://${window.location.hostname.replace('.loca.lt', '-api.loca.lt')}`
-      : (window.location.hostname.includes('localtunnel.me')
-          ? `https://${window.location.hostname.replace('.localtunnel.me', '-api.localtunnel.me')}`
-          : 'http://127.0.0.1:5000'));
+      : 'http://127.0.0.1:5000');
 
-const ALERT_META = {
-  'no_face': { label: 'Face Not Detected', icon: EyeOff, category: 'Identity' },
-  'multiple_faces': { label: 'Multiple Faces', icon: Users, category: 'Identity' },
-  'off_screen_gaze': { label: 'Off-Screen Gaze', icon: Monitor, category: 'Attention' },
-  'window_switch_attempt': { label: 'Tab Switch Attempt', icon: Maximize, category: 'Navigation' },
-  'dependency_error': { label: 'Engine Crash', icon: AlertCircle, category: 'System' },
-  'camera_error': { label: 'Camera Offline', icon: AlertCircle, category: 'System' },
+const ALERT_TITLES = {
+  'no_face': 'Face Not Detected',
+  'multiple_faces': 'Multiple Faces Detected',
+  'off_screen_gaze': 'Off-Screen Gaze Shift',
+  'window_switch_attempt': 'Tab / Window Switch Attempt',
+  'keyboard_shortcut_attempt': 'Blocked Keyboard Shortcut',
+  'copy_attempt': 'Clipboard Copy Blocked',
+  'paste_detected': 'Clipboard Paste Blocked',
+  'c_attempt': 'Copy Shortcut Blocked',
+  'v_attempt': 'Paste Shortcut Blocked',
+  'x_attempt': 'Cut Shortcut Blocked',
+  'suspicious_material': 'Unauthorized Object Flagged',
+  'speech_detected': 'Background Speech Detected',
+  'camera_error': 'Camera Feed Interrupted',
+  'dependency_error': 'System Notice'
 };
 
-const SEVERITY_STYLE = {
-  high:   { bg: 'rgba(127,29,29,0.2)',   border: 'rgba(239,68,68,0.3)',   dot: '#ef4444', text: '#fca5a5',  badge: 'CRITICAL' },
-  medium: { bg: 'rgba(120,53,15,0.15)',  border: 'rgba(245,158,11,0.25)', dot: '#f59e0b', text: '#fcd34d',  badge: 'WARNING' },
-  low:    { bg: 'rgba(23,37,84,0.15)',   border: 'rgba(99,102,241,0.2)',  dot: '#6366f1', text: '#a5b4fc',  badge: 'INFO' },
-};
-
-const AlertsPanel = ({ roomId }) => {
+const AlertsPanel = ({ roomId, onSendCandidateWarning }) => {
   const [alerts, setAlerts] = useState([]);
-  const [lastUpdate, setLastUpdate] = useState(null);
-  const [isConnected, setIsConnected] = useState(false);
   const [activeFilter, setActiveFilter] = useState('all');
+  const [sentWarning, setSentWarning] = useState(null);
 
   useEffect(() => {
     setAlerts([]);
+    if (!roomId) return;
 
     const fetchLogs = async () => {
       try {
@@ -40,15 +43,15 @@ const AlertsPanel = ({ roomId }) => {
         if (res.ok) {
           const data = await res.json();
           const mapped = data.map(log => ({
-            id: log.id,
+            id: log.id || log._id || Date.now() + Math.random(),
             timestamp: new Date(log.timestamp),
-            event: log.event,
-            severity: log.severity,
+            event: log.event || log.anomalyType,
+            severity: log.severity || 'medium',
             confidence: log.confidence || 1.0,
+            details: log.details || '',
             count: 1
           }));
           setAlerts(mapped);
-          if (mapped.length > 0) setLastUpdate(new Date());
         }
       } catch (err) {
         console.error('Failed to fetch logs:', err);
@@ -58,51 +61,58 @@ const AlertsPanel = ({ roomId }) => {
     fetchLogs();
 
     const socket = io(`${BACKEND}/proctor`);
-    socket.on('connect', () => {
-      setIsConnected(true);
-      socket.emit('join_room', String(roomId));
-    });
-    socket.on('disconnect', () => setIsConnected(false));
+    socket.emit('join_room', String(roomId));
 
     socket.on('proctor_alert', (data) => {
-      setLastUpdate(new Date());
       setAlerts(prev => {
-        if (prev.length > 0 && prev[0].event === data.event) {
+        const newEvent = data.event || data.anomalyType;
+        if (prev.length > 0 && prev[0].event === newEvent) {
           const updated = [...prev];
-          updated[0] = { ...updated[0], count: (updated[0].count || 1) + 1, timestamp: new Date() };
+          updated[0] = {
+            ...updated[0],
+            count: (updated[0].count || 1) + 1,
+            timestamp: new Date()
+          };
           return updated;
         }
-        return [{ id: Date.now(), timestamp: new Date(), count: 1, ...data }, ...prev];
+        return [{
+          id: Date.now(),
+          timestamp: new Date(),
+          event: newEvent,
+          severity: data.severity || 'medium',
+          confidence: data.confidence || 1.0,
+          details: data.details || '',
+          count: 1
+        }, ...prev];
       });
-    });
-
-    socket.on('score_update', (data) => {
-      // handled in parent component
     });
 
     return () => socket.disconnect();
   }, [roomId]);
 
-  // ── Stats Aggregation ────────────────────────────────────────────────────
-  const stats = alerts.reduce((acc, a) => {
-    acc[a.event] = (acc[a.event] || 0) + (a.count || 1);
-    return acc;
-  }, {});
+  // Quick broadcast warning to candidate
+  const handleQuickWarning = (text) => {
+    if (onSendCandidateWarning) {
+      onSendCandidateWarning(text);
+      setSentWarning(text);
+      setTimeout(() => setSentWarning(null), 3000);
+    }
+  };
 
-  const totalViolations = Object.values(stats).reduce((a, b) => a + b, 0);
-  const highCount = alerts.filter(a => a.severity === 'high').reduce((s, a) => s + (a.count || 1), 0);
-  const mediumCount = alerts.filter(a => a.severity === 'medium').reduce((s, a) => s + (a.count || 1), 0);
+  // Count aggregates
+  const counts = {
+    offScreen: alerts.filter(a => a.event === 'off_screen_gaze').reduce((s, a) => s + (a.count || 1), 0),
+    tabSwitch: alerts.filter(a => a.event === 'window_switch_attempt').reduce((s, a) => s + (a.count || 1), 0),
+    noFace: alerts.filter(a => a.event === 'no_face' || a.event === 'camera_error').reduce((s, a) => s + (a.count || 1), 0),
+    multiFace: alerts.filter(a => a.event === 'multiple_faces').reduce((s, a) => s + (a.count || 1), 0),
+  };
 
-  // ── Status ───────────────────────────────────────────────────────────────
-  let status = { label: 'All Clear', sub: 'No violations detected', color: '#22c55e', bg: 'rgba(21,128,61,0.12)', border: 'rgba(34,197,94,0.2)', Icon: ShieldCheck };
-  if (highCount > 0 || totalViolations > 5) {
-    status = { label: 'Critical Alert', sub: `${highCount} high severity flags`, color: '#ef4444', bg: 'rgba(127,29,29,0.2)', border: 'rgba(239,68,68,0.35)', Icon: ShieldAlert };
-  } else if (totalViolations > 0) {
-    status = { label: 'Suspicious Activity', sub: `${totalViolations} violation(s) logged`, color: '#f59e0b', bg: 'rgba(120,53,15,0.15)', border: 'rgba(245,158,11,0.3)', Icon: AlertCircle };
-  }
+  const totalViolations = alerts.reduce((sum, a) => sum + (a.count || 1), 0);
+  const highSeverityCount = alerts.filter(a => a.severity === 'high').reduce((s, a) => s + (a.count || 1), 0);
 
-  // ── Filter ───────────────────────────────────────────────────────────────
-  const filteredAlerts = activeFilter === 'all' ? alerts : alerts.filter(a => a.severity === activeFilter);
+  const filteredAlerts = activeFilter === 'all'
+    ? alerts
+    : alerts.filter(a => a.severity === activeFilter);
 
   const fmtTime = (dt) => {
     if (!dt) return '—';
@@ -111,120 +121,251 @@ const AlertsPanel = ({ roomId }) => {
   };
 
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: '0', background: 'rgba(5,13,26,0.6)', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '12px', overflow: 'hidden' }}>
+    <div style={{
+      height: '100%',
+      display: 'flex',
+      flexDirection: 'column',
+      background: 'var(--bg-card)',
+      border: '1px solid var(--border-subtle)',
+      borderRadius: '12px',
+      overflow: 'hidden',
+      boxShadow: 'var(--shadow-sm)'
+    }}>
       {/* Header */}
-      <div style={{ padding: '16px', borderBottom: '1px solid rgba(255,255,255,0.04)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(5,13,26,0.4)' }}>
+      <div style={{
+        padding: '12px 16px',
+        borderBottom: '1px solid var(--border-subtle)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        background: 'var(--bg-surface)'
+      }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <Activity style={{ width: '16px', height: '16px', color: '#d4a017' }} />
-          <span style={{ fontFamily: "'Playfair Display', serif", fontSize: '15px', fontWeight: '600', color: '#f5f0e8' }}>Proctoring Monitor</span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '10px', color: isConnected ? '#86efac' : '#fca5a5' }}>
-            <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: isConnected ? '#22c55e' : '#ef4444' }} />
-            {isConnected ? 'Live' : 'Offline'}
-          </span>
-          <span style={{ padding: '2px 8px', borderRadius: '10px', background: 'rgba(212,160,23,0.1)', border: '1px solid rgba(212,160,23,0.2)', fontSize: '10px', fontWeight: '700', color: '#d4a017', fontFamily: "'JetBrains Mono', monospace" }}>
-            {totalViolations} FLAGS
+          <Activity size={15} style={{ color: 'var(--primary)' }} />
+          <span style={{ fontSize: '13px', fontWeight: '700', color: 'var(--text-primary)' }}>
+            Proctoring Telemetry
           </span>
         </div>
+        <span className={`badge ${totalViolations === 0 ? 'badge-active' : highSeverityCount > 0 ? 'badge-danger' : 'badge-warning'}`}>
+          {totalViolations === 0 ? 'Clean Session' : `${totalViolations} Event${totalViolations > 1 ? 's' : ''}`}
+        </span>
       </div>
 
-      {/* Status Card */}
-      <div style={{ margin: '12px', padding: '12px 16px', borderRadius: '8px', background: status.bg, border: `1px solid ${status.border}`, display: 'flex', alignItems: 'center', gap: '12px' }}>
-        <status.Icon style={{ width: '20px', height: '20px', color: status.color, flexShrink: 0 }} />
-        <div>
-          <p style={{ fontSize: '12px', fontWeight: '700', color: status.color, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{status.label}</p>
-          <p style={{ fontSize: '11px', color: 'rgba(245,240,232,0.5)', marginTop: '1px' }}>{status.sub}</p>
+      <div style={{ padding: '14px', display: 'flex', flexDirection: 'column', gap: '12px', flex: 1, overflow: 'hidden' }}>
+        {/* Compliance Status Card */}
+        <div style={{
+          padding: '12px 14px',
+          borderRadius: '8px',
+          background: totalViolations === 0 ? 'var(--success-bg)' : (highSeverityCount > 0 ? 'var(--danger-bg)' : 'var(--warning-bg)'),
+          border: `1px solid ${totalViolations === 0 ? 'var(--success-border)' : (highSeverityCount > 0 ? 'var(--danger-border)' : 'var(--warning-border)')}`,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px'
+        }}>
+          <div style={{
+            width: '32px',
+            height: '32px',
+            borderRadius: '6px',
+            background: 'var(--bg-card)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            flexShrink: 0
+          }}>
+            {totalViolations === 0 ? (
+              <ShieldCheck size={18} style={{ color: 'var(--success)' }} />
+            ) : highSeverityCount > 0 ? (
+              <ShieldAlert size={18} style={{ color: 'var(--danger)' }} />
+            ) : (
+              <AlertCircle size={18} style={{ color: 'var(--warning)' }} />
+            )}
+          </div>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{
+              fontSize: '12px',
+              fontWeight: '700',
+              color: totalViolations === 0 ? 'var(--success)' : (highSeverityCount > 0 ? 'var(--danger)' : 'var(--warning)')
+            }}>
+              {totalViolations === 0 ? 'Candidate Compliant' : (highSeverityCount > 0 ? 'High Severity Violations' : 'Minor Behavioral Flags')}
+            </div>
+            <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '2px' }} className="truncate">
+              {totalViolations === 0
+                ? 'AI vision & environment models report normal behavior.'
+                : `${totalViolations} flagged events in room timeline.`}
+            </div>
+          </div>
         </div>
-      </div>
 
-      {/* Metrics Grid */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', margin: '0 12px' }}>
-        {[
-          { label: 'Off-Screen', count: stats['off_screen_gaze'] || 0, color: '#fcd34d' },
-          { label: 'Tab Switches', count: stats['window_switch_attempt'] || 0, color: '#fca5a5' },
-          { label: 'No Face', count: stats['no_face'] || 0, color: '#f87171' },
-          { label: 'Multi-Face', count: stats['multiple_faces'] || 0, color: '#f87171' },
-        ].map(m => (
-          <div key={m.label} style={{ padding: '10px 12px', borderRadius: '8px', background: 'rgba(5,13,26,0.5)', border: '1px solid rgba(255,255,255,0.04)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '11px', color: 'rgba(143,160,184,0.6)' }}>{m.label}</span>
-            <span style={{ fontSize: '15px', fontWeight: '700', fontFamily: "'JetBrains Mono', monospace", color: m.count > 0 ? m.color : 'rgba(143,160,184,0.3)' }}>{m.count}</span>
-          </div>
-        ))}
-      </div>
-
-      {/* Filter Pills */}
-      <div style={{ display: 'flex', gap: '6px', margin: '12px 12px 8px', flexShrink: 0 }}>
-        <span style={{ fontSize: '10px', color: 'rgba(143,160,184,0.4)', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.06em', alignSelf: 'center', marginRight: '2px' }}>Filter:</span>
-        {['all', 'high', 'medium', 'low'].map(f => (
-          <button key={f} onClick={() => setActiveFilter(f)}
-            style={{ padding: '3px 10px', borderRadius: '12px', fontSize: '10px', fontWeight: '700', cursor: 'pointer', textTransform: 'uppercase', letterSpacing: '0.04em', transition: 'all 0.15s', border: `1px solid ${activeFilter === f ? (f === 'all' ? 'rgba(212,160,23,0.4)' : f === 'high' ? 'rgba(239,68,68,0.4)' : f === 'medium' ? 'rgba(245,158,11,0.4)' : 'rgba(99,102,241,0.4)') : 'rgba(255,255,255,0.06)'}`, background: activeFilter === f ? (f === 'all' ? 'rgba(212,160,23,0.1)' : f === 'high' ? 'rgba(239,68,68,0.1)' : f === 'medium' ? 'rgba(245,158,11,0.1)' : 'rgba(99,102,241,0.1)') : 'transparent', color: activeFilter === f ? (f === 'all' ? '#d4a017' : f === 'high' ? '#fca5a5' : f === 'medium' ? '#fcd34d' : '#a5b4fc') : 'rgba(143,160,184,0.5)' }}>
-            {f}
-          </button>
-        ))}
-      </div>
-
-      {/* Timeline */}
-      <div style={{ padding: '0 12px 4px', marginBottom: '4px' }}>
-        <p style={{ fontSize: '10px', fontWeight: '700', color: 'rgba(143,160,184,0.4)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-          Security Timeline {filteredAlerts.length > 0 && `— ${filteredAlerts.length} events`}
-        </p>
-      </div>
-
-      <div style={{ flex: 1, overflowY: 'auto', padding: '0 12px 12px' }}>
-        {filteredAlerts.length === 0 ? (
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '120px', gap: '8px' }}>
-            <Shield style={{ width: '32px', height: '32px', opacity: 0.12 }} />
-            <p style={{ fontSize: '12px', color: 'rgba(143,160,184,0.25)' }}>
-              {activeFilter === 'all' ? 'No violations recorded' : `No ${activeFilter} severity events`}
-            </p>
-          </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0' }}>
-            {filteredAlerts.map((alert, idx) => {
-              const meta = ALERT_META[alert.event] || { label: alert.event, icon: AlertCircle, category: 'Unknown' };
-              const sev = SEVERITY_STYLE[alert.severity] || SEVERITY_STYLE.low;
-              const Icon = meta.icon;
-              return (
-                <div key={alert.id} className="timeline-item animate-slide-right" style={{ animationDelay: `${idx * 30}ms`, paddingBottom: '10px', marginBottom: '2px' }}>
-                  {/* Timeline dot */}
-                  <div className="timeline-dot" style={{ color: sev.dot, background: `${sev.dot}22` }} />
-                  
-                  <div style={{ padding: '10px 12px', borderRadius: '8px', background: sev.bg, border: `1px solid ${sev.border}` }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '6px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
-                        <Icon style={{ width: '13px', height: '13px', color: sev.text, flexShrink: 0 }} />
-                        <span style={{ fontSize: '12px', fontWeight: '700', color: sev.text }}>{meta.label}</span>
-                      </div>
-                      <span style={{ padding: '1px 6px', borderRadius: '4px', fontSize: '9px', fontWeight: '800', letterSpacing: '0.06em', background: `${sev.dot}22`, color: sev.text, border: `1px solid ${sev.border}`, flexShrink: 0 }}>{sev.badge}</span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div style={{ display: 'flex', gap: '10px' }}>
-                        <span style={{ fontSize: '10px', color: 'rgba(143,160,184,0.5)' }}>Category: <span style={{ color: 'rgba(143,160,184,0.7)' }}>{meta.category}</span></span>
-                        {alert.confidence < 1 && <span style={{ fontSize: '10px', color: 'rgba(143,160,184,0.5)' }}>Conf: {Math.round(alert.confidence * 100)}%</span>}
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        {alert.count > 1 && (
-                          <span style={{ fontSize: '10px', fontWeight: '700', padding: '1px 7px', borderRadius: '10px', background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.08)', color: '#f5f0e8', fontFamily: "'JetBrains Mono', monospace" }}>×{alert.count}</span>
-                        )}
-                        <span style={{ fontSize: '10px', color: 'rgba(143,160,184,0.35)', fontFamily: "'JetBrains Mono', monospace" }}>{fmtTime(alert.timestamp)}</span>
-                      </div>
-                    </div>
-                  </div>
+        {/* 2x2 Metric Grid */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+          {[
+            { label: 'Gaze Shifts', val: counts.offScreen, icon: Eye, color: counts.offScreen > 0 ? 'var(--warning)' : 'var(--text-muted)' },
+            { label: 'Tab Switches', val: counts.tabSwitch, icon: Monitor, color: counts.tabSwitch > 0 ? 'var(--danger)' : 'var(--text-muted)' },
+            { label: 'Face Absent', val: counts.noFace, icon: ShieldAlert, color: counts.noFace > 0 ? 'var(--danger)' : 'var(--text-muted)' },
+            { label: 'Multi-Face', val: counts.multiFace, icon: Users, color: counts.multiFace > 0 ? 'var(--danger)' : 'var(--text-muted)' },
+          ].map(m => {
+            const Icon = m.icon;
+            return (
+              <div key={m.label} style={{
+                padding: '8px 12px',
+                borderRadius: '8px',
+                background: 'var(--bg-elevated)',
+                border: '1px solid var(--border-subtle)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Icon size={12} style={{ color: 'var(--text-muted)' }} />
+                  <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{m.label}</span>
                 </div>
-              );
-            })}
+                <span style={{
+                  fontSize: '12px',
+                  fontWeight: '700',
+                  fontFamily: "'JetBrains Mono', monospace",
+                  color: m.color
+                }}>
+                  {m.val}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Quick Warning Broadcast Actions */}
+        {onSendCandidateWarning && (
+          <div style={{ padding: '8px 10px', borderRadius: '8px', background: 'var(--bg-surface)', border: '1px solid var(--border-subtle)' }}>
+            <span style={{ fontSize: '10px', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.4px', display: 'block', marginBottom: '6px' }}>
+              Broadcast Reminder to Candidate
+            </span>
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+              {[
+                'Please keep eyes on screen',
+                'Ensure webcam is centered',
+                'Please minimize background noise'
+              ].map(txt => (
+                <button
+                  key={txt}
+                  type="button"
+                  onClick={() => handleQuickWarning(txt)}
+                  className="btn btn-ghost btn-sm"
+                  style={{
+                    fontSize: '10px',
+                    padding: '3px 8px',
+                    background: sentWarning === txt ? 'var(--success-bg)' : 'var(--bg-elevated)',
+                    border: `1px solid ${sentWarning === txt ? 'var(--success-border)' : 'var(--border-faint)'}`,
+                    color: sentWarning === txt ? 'var(--success)' : 'var(--text-secondary)'
+                  }}
+                >
+                  {sentWarning === txt ? <Check size={10} /> : <Send size={10} />}
+                  <span>{txt.split(' ')[2] || txt}</span>
+                </button>
+              ))}
+            </div>
           </div>
         )}
-      </div>
 
-      {/* Footer */}
-      {lastUpdate && (
-        <div style={{ padding: '8px 12px', borderTop: '1px solid rgba(255,255,255,0.04)', display: 'flex', alignItems: 'center', gap: '6px', background: 'rgba(5,13,26,0.4)' }}>
-          <Clock style={{ width: '11px', height: '11px', color: 'rgba(143,160,184,0.3)' }} />
-          <span style={{ fontSize: '10px', color: 'rgba(143,160,184,0.3)' }}>Last event: {fmtTime(lastUpdate)}</span>
+        {/* Filter bar */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '2px' }}>
+          <span style={{ fontSize: '11px', fontWeight: '700', color: 'var(--text-muted)', letterSpacing: '0.4px', textTransform: 'uppercase' }}>
+            Event Log ({filteredAlerts.length})
+          </span>
+          <div style={{ display: 'flex', gap: '4px' }}>
+            {['all', 'high', 'medium'].map(f => (
+              <button
+                key={f}
+                type="button"
+                onClick={() => setActiveFilter(f)}
+                className="btn btn-ghost btn-sm"
+                style={{
+                  fontSize: '10px',
+                  fontWeight: '700',
+                  padding: '2px 8px',
+                  background: activeFilter === f ? 'var(--primary-light)' : 'transparent',
+                  color: activeFilter === f ? 'var(--primary)' : 'var(--text-muted)',
+                  border: `1px solid ${activeFilter === f ? 'var(--primary-border)' : 'transparent'}`,
+                  textTransform: 'uppercase'
+                }}
+              >
+                {f}
+              </button>
+            ))}
+          </div>
         </div>
-      )}
+
+        {/* Scrollable Timeline */}
+        <div style={{
+          flex: 1,
+          overflowY: 'auto',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '6px',
+          paddingRight: '2px'
+        }}>
+          {filteredAlerts.length === 0 ? (
+            <div style={{
+              flex: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'var(--text-muted)',
+              textAlign: 'center',
+              padding: '24px'
+            }}>
+              <ShieldCheck size={28} style={{ opacity: 0.35, marginBottom: '8px' }} />
+              <div style={{ fontSize: '12px', fontWeight: '600' }}>No Security Incidents</div>
+              <div style={{ fontSize: '11px', marginTop: '2px', opacity: 0.7 }}>Candidate integrity within normal thresholds</div>
+            </div>
+          ) : (
+            filteredAlerts.map(a => {
+              const isHigh = a.severity === 'high';
+              const title = ALERT_TITLES[a.event] || a.event.replace(/_/g, ' ');
+              return (
+                <div
+                  key={a.id}
+                  style={{
+                    padding: '8px 10px',
+                    borderRadius: '6px',
+                    background: isHigh ? 'var(--danger-bg)' : 'var(--warning-bg)',
+                    border: `1px solid ${isHigh ? 'var(--danger-border)' : 'var(--warning-border)'}`,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '4px'
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{
+                      fontSize: '11px',
+                      fontWeight: '700',
+                      color: isHigh ? 'var(--danger)' : 'var(--warning)'
+                    }}>
+                      {title}
+                    </span>
+                    <span style={{ fontSize: '10px', fontFamily: "'JetBrains Mono', monospace", color: 'var(--text-muted)' }}>
+                      {fmtTime(a.timestamp)}
+                    </span>
+                  </div>
+                  {a.details && (
+                    <div style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: '1.4' }}>
+                      {a.details}
+                    </div>
+                  )}
+                  {a.count > 1 && (
+                    <span style={{
+                      fontSize: '10px',
+                      fontWeight: '700',
+                      color: isHigh ? 'var(--danger)' : 'var(--warning)'
+                    }}>
+                      Occurred {a.count} times
+                    </span>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
     </div>
   );
 };

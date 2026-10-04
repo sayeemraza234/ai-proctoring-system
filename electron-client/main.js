@@ -24,12 +24,12 @@ function getProtocolUrl(argv) {
 }
 
 function getWebUrlFromProtocol(protocolUrl) {
-    if (!protocolUrl) return 'http://localhost:5173/';
+    if (!protocolUrl) return 'http://localhost:5180/';
     try {
         const urlObj = new URL(protocolUrl);
         const searchParams = new URLSearchParams(urlObj.search);
         const hostParam = searchParams.get('host');
-        let baseHost = 'http://localhost:5173';
+        let baseHost = 'http://localhost:5180';
         if (hostParam) {
             baseHost = hostParam;
             try {
@@ -46,16 +46,20 @@ function getWebUrlFromProtocol(protocolUrl) {
         return targetUrl;
     } catch (e) {
         console.error('[PROTOCOL] Failed to parse protocol URL:', e);
-        return 'http://localhost:5173/?autostart=true';
+        return 'http://localhost:5180/?autostart=true';
     }
 }
 
 function getCommandLineSession(argv = []) {
     let username = null;
     let interviewId = null;
+    let role = 'candidate';
     argv.forEach(arg => {
         if (arg.startsWith('--user=')) {
             username = arg.replace('--user=', '').replace(/"/g, '').trim();
+        }
+        if (arg.startsWith('--role=')) {
+            role = arg.replace('--role=', '').replace(/"/g, '').trim();
         }
         if (arg.startsWith('--interview=')) {
             interviewId = arg.replace('--interview=', '').replace(/"/g, '').trim();
@@ -64,11 +68,12 @@ function getCommandLineSession(argv = []) {
             try {
                 const u = new URL(arg);
                 username = u.searchParams.get('username') || u.searchParams.get('user');
+                role = u.searchParams.get('role') || 'candidate';
                 interviewId = u.searchParams.get('interviewId') || u.searchParams.get('interview');
             } catch {}
         }
     });
-    return { username, interviewId };
+    return { username, role, interviewId };
 }
 
 ipcMain.handle('get-session-args', () => {
@@ -95,12 +100,15 @@ if (!gotTheLock) {
 }
 
 function createWindow() {
+    const initialSession = getCommandLineSession(process.argv);
+    const isCandidate = initialSession.role !== 'interviewer';
+
     mainWindow = new BrowserWindow({
         width: 1280,
         height: 800,
         minWidth: 1024,
         minHeight: 680,
-        fullscreen: true,        // Open full-screen from the very first launch
+        fullscreen: false,
         kiosk: false,
         alwaysOnTop: false,
         autoHideMenuBar: true,
@@ -108,10 +116,10 @@ function createWindow() {
             preload: path.join(__dirname, 'preload.js'),
             contextIsolation: true,
             nodeIntegration: false,
-            webSecurity: false,   // allow local file to call localhost:5000 API
+            webSecurity: false,
             devTools: process.env.NODE_ENV !== 'production'
         },
-        title: 'ProctorAI — Secure Exam Terminal',
+        title: isCandidate ? 'ProctorAI — Secure Candidate Exam Terminal' : 'ProctorAI — Interviewer Command Center',
         backgroundColor: '#050d1a',
     });
 
@@ -128,6 +136,13 @@ function createWindow() {
         return callback(false);
     });
 
+        // Candidate starts in standard maximized window WITHOUT kiosk lockdown.
+    // Kiosk lockdown and security shortcuts engage ONLY when candidate starts the actual exam.
+    examActive = false;
+    isKioskMode = false;
+    mainWindow.maximize();
+    console.log('[BOOT] Initialized window in standard maximized mode. Kiosk lock deferred until exam begins.');
+
     // Automatically close DevTools if opened during exam mode
     mainWindow.webContents.on('devtools-opened', () => {
         if (examActive) {
@@ -135,17 +150,25 @@ function createWindow() {
         }
     });
 
-    // Load the self-contained candidate exam UI with CLI session query parameters
-    const examPage = path.join(__dirname, 'src', 'index.html');
-    const initialSession = getCommandLineSession(process.argv);
-    const queryParams = {};
-    if (initialSession.username) queryParams.user = initialSession.username;
-    if (initialSession.interviewId) queryParams.interview = initialSession.interviewId;
+    // Load appropriate interface based on role
+    if (initialSession.role === 'interviewer') {
+        const targetUrl = `http://localhost:5180/?role=interviewer&user=${encodeURIComponent(initialSession.username || '')}&electron=true`;
+        mainWindow.loadURL(targetUrl).catch(() => {
+            // Fallback to local files if dev server is unreachable
+            mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
+        });
+        console.log('[BOOT] Loading Interviewer Command Center for:', initialSession.username);
+    } else {
+        const examPage = path.join(__dirname, 'src', 'index.html');
+        const queryParams = { role: 'candidate' };
+        if (initialSession.username) queryParams.user = initialSession.username;
+        if (initialSession.interviewId) queryParams.interview = initialSession.interviewId;
 
-    mainWindow.loadFile(examPage, { query: queryParams }).catch(err => {
-        console.error('Failed to load exam page:', err.message);
-    });
-    console.log('[BOOT] Loading secure exam terminal with session:', initialSession);
+        mainWindow.loadFile(examPage, { query: queryParams }).catch(err => {
+            console.error('Failed to load exam page:', err.message);
+        });
+        console.log('[BOOT] Loading secure exam terminal for candidate:', initialSession);
+    }
 
     // Handle window blur — block alt-tab aggressively during exam
     let blurInterval = null;
@@ -207,7 +230,7 @@ function createWindow() {
     });
 
     mainWindow.on('close', (event) => {
-        // Block closing during exam
+        // Block closing during ACTIVE exam only
         if (examActive) {
             event.preventDefault();
             mainWindow.webContents.send('ai-log', {
@@ -215,6 +238,13 @@ function createWindow() {
                 severity: 'high',
                 confidence: 1.0
             });
+        } else {
+            // Exam not active - allow clean close
+            unregisterExamShortcuts();
+            if (aiProcess) {
+                try { if (typeof aiProcess.kill === 'function') aiProcess.kill(); } catch (e) {}
+                aiProcess = null;
+            }
         }
     });
 
@@ -295,7 +325,7 @@ app.on('window-all-closed', () => {
 });
 
 // ─── IPC: Start AI Engine (called when candidate starts exam) ────────────
-ipcMain.on('start-ai-engine', (event, { mock }) => {
+ipcMain.on('start-ai-engine', () => {
     examActive = true;
     isKioskMode = true;
 
@@ -325,32 +355,33 @@ ipcMain.on('start-ai-engine', (event, { mock }) => {
     }
 
     const scriptPath = path.join(__dirname, 'ai-engine', 'proctor.py');
-    // Always use mock mode when explicitly requested
-    const runMock = mock || false;
-
     // Try multiple Python executable names (python3 → python → py)
-    // If none work, auto-start in mock mode
     const pythonCandidates = ['python3', 'python', 'py'];
 
-    function trySpawnPython(candidates, isMock) {
+    function trySpawnPython(candidates) {
         if (candidates.length === 0) {
-            // No Python found — auto-start mock mode via a self-contained JS loop
-            console.warn('⚠️  Python not found. AI proctoring engine running in MOCK mode.');
-            console.warn('   Install Python to enable real face/gaze detection.');
-            startMockAiEngine();
+            console.error('AI proctoring unavailable: Python and MediaPipe are required.');
+            if (mainWindow) {
+                mainWindow.webContents.send('ai-log', {
+                    event: 'dependency_error',
+                    severity: 'high',
+                    confidence: 1.0,
+                    details: 'Real AI proctoring could not start. Install Python and the AI engine dependencies before beginning.'
+                });
+            }
             return;
         }
 
         const executable = candidates[0];
         const remaining = candidates.slice(1);
-        const spawnArgs = isMock ? [scriptPath, '--mock'] : [scriptPath];
+        const spawnArgs = [scriptPath];
 
         const proc = spawn(executable, spawnArgs, { stdio: ['pipe', 'pipe', 'pipe'] });
 
         proc.on('error', (err) => {
             // This executable not found — try next one
             console.log(`[AI Engine] "${executable}" not available: ${err.message}`);
-            trySpawnPython(remaining, isMock);
+            trySpawnPython(remaining);
         });
 
         proc.stdout.on('data', (data) => {
@@ -375,7 +406,7 @@ ipcMain.on('start-ai-engine', (event, { mock }) => {
             // If Python isn't actually found (Windows gives a specific error), try next
             if (errMsg.includes('was not found') || errMsg.includes('cannot find') || errMsg.includes('No such file')) {
                 proc.removeAllListeners();
-                trySpawnPython(remaining, isMock);
+                trySpawnPython(remaining);
                 return;
             }
 
@@ -396,42 +427,10 @@ ipcMain.on('start-ai-engine', (event, { mock }) => {
 
         // Mark as confirmed running
         aiProcess = proc;
-        console.log(`🤖 AI Engine started via "${executable}" (mock=${isMock})`);
+        console.log(`🤖 AI Engine started via "${executable}"`);
     }
 
-    // Pure JS mock engine — emits random events, no Python needed
-    function startMockAiEngine() {
-        const mockEvents = [
-            { event: 'system_start', severity: 'low', confidence: 1.0 },
-        ];
-        if (mainWindow) mainWindow.webContents.send('ai-log', mockEvents[0]);
-
-        const eventPool = [
-            { event: 'no_face', severity: 'high', confidence: 0.9 },
-            { event: 'multiple_faces', severity: 'high', confidence: 0.95 },
-            { event: 'off_screen_gaze', severity: 'medium', confidence: 0.85 },
-        ];
-
-        let mockIntervalId = null;
-        const scheduleMockEvent = () => {
-            const delay = 8000 + Math.random() * 12000; // 8–20 seconds
-            mockIntervalId = setTimeout(() => {
-                if (!examActive) return;
-                const evt = eventPool[Math.floor(Math.random() * eventPool.length)];
-                if (mainWindow) mainWindow.webContents.send('ai-log', evt);
-                scheduleMockEvent();
-            }, delay);
-        };
-
-        scheduleMockEvent();
-
-        // Store cleanup reference
-        aiProcess = {
-            kill: () => { if (mockIntervalId) clearTimeout(mockIntervalId); mockIntervalId = null; }
-        };
-    }
-
-    trySpawnPython(pythonCandidates, runMock);
+    trySpawnPython(pythonCandidates);
 });
 
 // ─── IPC: End Interview (called when candidate submits answers) ───────────────
@@ -464,4 +463,54 @@ ipcMain.on('end-interview', () => {
     setTimeout(() => {
         if (app) app.quit();
     }, 500);
+});
+
+// ─── Clean Application Exit Handler ──────────────────────────────────
+function performSafeExit(reason = 'User Request') {
+    console.log(`[EXIT] Safe exit invoked (${reason}). Releasing locks and shutting down.`);
+    examActive = false;
+    isKioskMode = false;
+
+    // Unregister all blocked shortcuts first
+    unregisterExamShortcuts();
+
+    // Stop AI process
+    if (aiProcess) {
+        try {
+            if (typeof aiProcess.kill === 'function') aiProcess.kill();
+        } catch (e) {}
+        aiProcess = null;
+    }
+
+    // Release all window restrictions and close
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        try {
+            mainWindow.setKiosk(false);
+            mainWindow.setFullScreen(false);
+            mainWindow.setAlwaysOnTop(false);
+            mainWindow.setResizable(true);
+            mainWindow.setMovable(true);
+            mainWindow.setMinimizable(true);
+            mainWindow.setMaximizable(true);
+            mainWindow.setClosable(true);
+            mainWindow.destroy();
+        } catch (e) {}
+    }
+
+    // Force quit immediately
+    setTimeout(() => {
+        if (app) {
+            app.exit(0);
+        }
+    }, 50);
+}
+
+// IPC: Standard Exit (available from initial launch)
+ipcMain.on('exit-app', () => {
+    performSafeExit('exit-app IPC');
+});
+
+// IPC: Emergency Exit (safety valve – always available)
+ipcMain.on('emergency-exit', () => {
+    performSafeExit('emergency-exit IPC');
 });

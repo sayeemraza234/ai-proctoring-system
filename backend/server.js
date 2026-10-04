@@ -29,12 +29,10 @@ function configuredSecret(name) {
 startMongoDB()
     .then(async (uri) => {
         console.log('✅ MongoDB ready at:', uri);
-        await cleanupLegacyDemoData();
-        await seedDefaultQuestions();
+        try { await cleanupLegacyDemoData(); } catch (e) { console.warn('Cleanup note:', e.message); }
     })
     .catch(err => {
-        console.error('❌ Could not start MongoDB:', err.message);
-        process.exit(1);
+        console.error('Could not start MongoDB:', err.message);
     });
 
 // ─── Real-World Cleanup of Legacy Demo Data ──────────────────────────────────
@@ -57,83 +55,6 @@ async function cleanupLegacyDemoData() {
     } catch (err) {
         console.warn('⚠️  Could not clean legacy demo data:', err.message);
     }
-}
-
-// ─── Question Catalog Initialization ──────────────────────────────────────────
-async function seedDefaultQuestions() {
-    const count = await Question.countDocuments();
-    if (count > 0) return;
-
-    console.log('📚 Initializing standard technical question catalog...');
-
-    await Question.create([
-        {
-            title: 'Reverse a Linked List',
-            description: 'Given the head of a singly linked list, reverse the list and return the reversed list. Your solution should have O(n) time and O(1) space complexity.',
-            type: 'coding', difficulty: 'medium', topic: 'Linked Lists', language: 'javascript',
-            starterCode: '/**\n * @param {ListNode} head\n * @return {ListNode}\n */\nfunction reverseList(head) {\n    // Write your solution here\n    \n}',
-            testCases: [
-                { input: '[1,2,3,4,5]', expectedOutput: '[5,4,3,2,1]', isHidden: false },
-                { input: '[1,2]', expectedOutput: '[2,1]', isHidden: false },
-                { input: '[]', expectedOutput: '[]', isHidden: true }
-            ],
-            tags: ['linked-list', 'recursion', 'two-pointer']
-        },
-        {
-            title: 'Valid Anagram',
-            description: 'Given two strings s and t, return true if t is an anagram of s, and false otherwise. An anagram is a word formed by rearranging all letters of another word.',
-            type: 'coding', difficulty: 'easy', topic: 'Strings', language: 'javascript',
-            starterCode: '/**\n * @param {string} s\n * @param {string} t\n * @return {boolean}\n */\nfunction isAnagram(s, t) {\n    // Write your solution here\n    \n}',
-            testCases: [
-                { input: 's = "anagram", t = "nagaram"', expectedOutput: 'true', isHidden: false },
-                { input: 's = "rat", t = "car"', expectedOutput: 'false', isHidden: false }
-            ],
-            tags: ['hash-map', 'string', 'sorting']
-        },
-        {
-            title: 'Two Sum',
-            description: 'Given an array of integers nums and an integer target, return indices of the two numbers such that they add up to target. You may assume that each input has exactly one solution.',
-            type: 'coding', difficulty: 'easy', topic: 'Arrays', language: 'javascript',
-            starterCode: '/**\n * @param {number[]} nums\n * @param {number} target\n * @return {number[]}\n */\nfunction twoSum(nums, target) {\n    // Write your solution here\n    \n}',
-            testCases: [
-                { input: 'nums = [2,7,11,15], target = 9', expectedOutput: '[0,1]', isHidden: false },
-                { input: 'nums = [3,2,4], target = 6', expectedOutput: '[1,2]', isHidden: false }
-            ],
-            tags: ['array', 'hash-map']
-        },
-        {
-            title: 'Binary Search',
-            description: 'Given an array of integers nums which is sorted in ascending order, and an integer target, write a function to search target in nums. If target exists, then return its index. Otherwise, return -1.',
-            type: 'coding', difficulty: 'easy', topic: 'Binary Search', language: 'javascript',
-            starterCode: '/**\n * @param {number[]} nums\n * @param {number} target\n * @return {number}\n */\nfunction search(nums, target) {\n    // Write your solution here\n    \n}',
-            testCases: [
-                { input: 'nums = [-1,0,3,5,9,12], target = 9', expectedOutput: '4', isHidden: false },
-                { input: 'nums = [-1,0,3,5,9,12], target = 2', expectedOutput: '-1', isHidden: false }
-            ],
-            tags: ['binary-search', 'array']
-        },
-        {
-            title: 'System Design: Design a URL Shortener',
-            description: 'Design a URL shortening service like bit.ly. Discuss the key components, data model, API design, scalability considerations, and trade-offs you would make. Consider: How would you handle 100M URLs? How do you ensure uniqueness? How do you scale reads vs writes?',
-            type: 'system_design', difficulty: 'hard', topic: 'System Design', language: 'text',
-            starterCode: '// Outline your system design here:\n// 1. Requirements (functional and non-functional)\n// 2. API Design\n// 3. Data Model\n// 4. High-Level Architecture\n// 5. Scalability Considerations\n// 6. Trade-offs\n',
-            tags: ['system-design', 'scalability', 'databases']
-        },
-        {
-            title: 'Time Complexity of Hash Map Lookup',
-            description: 'What is the average-case time complexity of looking up a key in a hash map?',
-            type: 'mcq', difficulty: 'easy', topic: 'Data Structures',
-            options: [
-                { text: 'O(1)', isCorrect: true },
-                { text: 'O(log n)', isCorrect: false },
-                { text: 'O(n)', isCorrect: false },
-                { text: 'O(n log n)', isCorrect: false }
-            ],
-            tags: ['data-structures', 'complexity']
-        }
-    ]);
-
-    console.log('✅ Standard technical question catalog ready.');
 }
 
 // ─── WebSocket Setup ──────────────────────────────────────────────────────────
@@ -179,25 +100,26 @@ app.post('/api/login', async (req, res) => {
 app.post('/api/candidates', async (req, res) => {
     try {
         const { username, password, fullname, email, phone } = req.body;
+        if (!username?.trim() || !password || password.length < 6) {
+            return res.status(400).json({ error: 'Username and a password of at least 6 characters are required.' });
+        }
         const existing = await User.findOne({ username });
         if (existing) return res.status(400).json({ error: 'Username already exists.' });
 
         const user = await User.create({
-            username, password: password || 'pass',
+            username, password,
             role: 'candidate', fullname: fullname || username,
             email: email || '', phone: phone || ''
         });
 
-        // Ensure newly registered candidates have an interview session ready with standard questions
-        const defaultQuestions = await Question.find().limit(5);
         const interview = await Interview.create({
             candidateId: user._id,
             jobRole: 'Software Engineer',
-            jobLevel: 'standard',
+            jobLevel: 'mid',
             department: 'Engineering',
             status: 'active',
             trustScore: 100,
-            questions: defaultQuestions.map(q => q._id),
+            questions: [],
             scheduledAt: new Date(),
             duration: 90
         });
@@ -209,7 +131,7 @@ app.post('/api/candidates', async (req, res) => {
             email: user.email,
             interview_id: interview._id,
             interviewId: interview._id,
-            questions: defaultQuestions
+            questions: []
         });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -401,6 +323,41 @@ app.post('/api/interviews/:id/activate', async (req, res) => {
 });
 
 // End interview
+// Terminate an interview directly from interviewer side
+app.post('/api/interviews/:id/terminate', async (req, res) => {
+    try {
+        const { reason, decision } = req.body;
+        const now = new Date();
+        const interview = await Interview.findById(req.params.id);
+        if (!interview) return res.status(404).json({ error: 'Interview not found' });
+
+        const dur = interview.startTime ? Math.floor((now - interview.startTime) / 1000) : 0;
+        const noteAddition = reason ? `\n[Terminated by Interviewer: ${reason}]` : '\n[Terminated by Interviewer]';
+
+        const updated = await Interview.findByIdAndUpdate(req.params.id, {
+            status: 'terminated',
+            decision: decision || 'reject',
+            endTime: now,
+            actualDuration: dur,
+            interviewerNotes: (interview.interviewerNotes || '') + noteAddition
+        }, { new: true });
+
+        // Broadcast to candidate's terminal and dashboard
+        proctorNamespace.to(String(req.params.id)).emit('interview_terminated', {
+            roomId: String(req.params.id),
+            reason: reason || 'Session terminated by interviewer.',
+            decision: decision || 'reject',
+            timestamp: now
+        });
+
+        console.log(`[PROCTOR] Interview ${req.params.id} terminated by interviewer. Reason: ${reason}`);
+        res.json({ success: true, interview: updated });
+    } catch (err) {
+        console.error('[TERMINATE] Error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 app.post('/api/interviews/:id/end', async (req, res) => {
     try {
         const { codeAnswers, mcqAnswers } = req.body;
@@ -426,6 +383,12 @@ app.post('/api/interviews/:id/end', async (req, res) => {
 app.post('/api/interviews/:id/ask-question', async (req, res) => {
     try {
         const { title, description, type, difficulty, topic } = req.body;
+        if (!title?.trim() || !description?.trim()) {
+            return res.status(400).json({ error: 'A question title and description are required.' });
+        }
+        if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+            return res.status(400).json({ error: 'Invalid interview id.' });
+        }
         const interview = await Interview.findById(req.params.id);
         if (!interview) return res.status(404).json({ error: 'Interview not found' });
 
@@ -444,6 +407,9 @@ app.post('/api/interviews/:id/ask-question', async (req, res) => {
         interview.questions.push(question._id);
         await interview.save();
 
+        // Notify any connected candidate immediately. The dashboard also emits
+        // this event for backwards compatibility with older clients.
+        proctorNamespace.to(String(interview._id)).emit('question_assigned', question);
         res.json({ success: true, question });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -482,7 +448,7 @@ app.patch('/api/interviews/:id/ai-eval', async (req, res) => {
 // Get logs for an interview
 app.get('/api/interviews/:id/logs', async (req, res) => {
     try {
-        const logs = await Log.find({ interviewId: req.params.id }).sort({ timestamp: -1 });
+        const logs = await Log.find({ interviewId: req.params.id }).sort({ timestamp: -1 }).limit(100);
         res.json(logs.map(l => ({
             id: l._id, interview_id: l.interviewId,
             timestamp: l.timestamp, event: l.anomalyType,
@@ -666,20 +632,6 @@ app.get('/api/analytics/stats', async (req, res) => {
     }
 });
 
-// ── Admin DB Viewer ──────────────────────────────────────────────────────────
-
-app.get('/api/admin/db', async (req, res) => {
-    try {
-        const users = await User.find({}).select('-password');
-        const interviews = await Interview.find({}).populate('candidateId', 'username fullname');
-        const logs = await Log.find({}).sort({ timestamp: -1 }).limit(200);
-        const questions = await Question.find({});
-        res.json({ users, interviews, logs, questions });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-});
-
 // ── Code Execution Proxy (Judge0) ────────────────────────────────────────────
 
 app.post('/api/run-code', async (req, res) => {
@@ -748,7 +700,7 @@ ${code}`;
                     const geminiData = await geminiRes.json();
                     const text = geminiData.candidates?.[0]?.content?.parts?.[0]?.text;
                     if (text) {
-                        const parsed = JSON.parse(text);
+                        const parsed = JSON.parse(cleanJsonText(text));
                         return res.json(parsed);
                     }
                 } catch (geminiErr) {
@@ -989,6 +941,26 @@ signalingNamespace.on('connection', (socket) => {
     socket.on('offer', (data) => socket.to(String(data.roomId)).emit('offer', data));
     socket.on('answer', (data) => socket.to(String(data.roomId)).emit('answer', data));
     socket.on('ice_candidate', (data) => socket.to(String(data.roomId)).emit('ice_candidate', data));
+    // Fail-safe video relay over Socket.IO (for networks where UDP WebRTC is restricted)
+    socket.on('relay_frame', (data) => {
+        if (data && data.roomId) {
+            socket.to(String(data.roomId)).emit('remote_frame', data);
+        }
+    });
+    socket.on('call_action', (data) => {
+        if (data && data.roomId) {
+            socket.to(String(data.roomId)).emit('call_action', data);
+        }
+    });
+    socket.on('interviewer_started', (data) => {
+        const roomId = String(data?.roomId || '').trim();
+        if (!roomId) return;
+        socket.to(roomId).emit('interviewer_started', data);
+        proctorNamespace.to(roomId).emit('interviewer_started', {
+            roomId,
+            interviewerName: data.interviewerName || 'The interviewer'
+        });
+    });
     socket.on('disconnect', () => console.log('[SIGNAL] Disconnected:', socket.id));
 });
 
@@ -1002,9 +974,60 @@ proctorNamespace.on('connection', (socket) => {
         console.log(`[PROCTOR] ${socket.id} joined room ${roomId}`);
     });
 
+    socket.on('interviewer_started', (data) => {
+        const roomId = String(data?.roomId || '').trim();
+        if (!roomId) return;
+        proctorNamespace.to(roomId).emit('interviewer_started', {
+            roomId,
+            interviewerName: data.interviewerName || 'The interviewer'
+        });
+    });
+
+    socket.on('terminate_interview', async (data) => {
+        try {
+            const { roomId, reason, decision } = data;
+            const now = new Date();
+            const interview = await Interview.findById(roomId);
+            if (!interview) return;
+
+            const dur = interview.startTime ? Math.floor((now - interview.startTime) / 1000) : 0;
+            const noteAddition = reason ? `\n[Terminated by Interviewer: ${reason}]` : '\n[Terminated by Interviewer]';
+
+            await Interview.findByIdAndUpdate(roomId, {
+                status: 'terminated',
+                decision: decision || 'reject',
+                endTime: now,
+                actualDuration: dur,
+                interviewerNotes: (interview.interviewerNotes || '') + noteAddition
+            });
+
+            // Broadcast to all participants in the room
+            proctorNamespace.to(String(roomId)).emit('interview_terminated', {
+                roomId: String(roomId),
+                reason: reason || 'Session terminated by interviewer.',
+                decision: decision || 'reject',
+                timestamp: now
+            });
+            console.log(`[SOCKET-PROCTOR] Interview ${roomId} terminated by interviewer.`);
+        } catch (err) {
+            console.error('[SOCKET-PROCTOR] Error in terminate_interview:', err.message);
+        }
+    });
+
     socket.on('assign_question', (data) => {
         socket.to(String(data.roomId)).emit('question_assigned', data.question);
         console.log(`[PROCTOR] Question assigned in room ${data.roomId}: ${data.question.title}`);
+    });
+
+    socket.on('answer_update', (data) => {
+        if (!data?.roomId || !data?.questionId) return;
+        socket.to(String(data.roomId)).emit('answer_updated', {
+            questionId: String(data.questionId),
+            questionIndex: Number.isInteger(data.questionIndex) ? data.questionIndex : null,
+            answer: typeof data.answer === 'string' ? data.answer : '',
+            answerType: data.answerType || 'code',
+            updatedAt: new Date().toISOString()
+        });
     });
 
     socket.on('anomaly_alert', async (data) => {
@@ -1076,53 +1099,138 @@ chatNamespace.on('connection', (socket) => {
 });
 
 // ─── Electron Client On-Demand Launch & Candidate Session ─────────────────────
-let latestActiveCandidateSession = null;
+let latestActiveTerminalSession = null;
+
+function cleanJsonText(rawText) {
+    if (!rawText) return '{}';
+    let cleaned = rawText.trim();
+    if (cleaned.startsWith('```json')) {
+        cleaned = cleaned.replace(/^```json\s*/, '').replace(/\s*```$/, '');
+    } else if (cleaned.startsWith('```')) {
+        cleaned = cleaned.replace(/^```\s*/, '').replace(/\s*```$/, '');
+    }
+    return cleaned.trim();
+}
 
 app.post('/api/launch-electron', async (req, res) => {
     try {
-        const { username, interviewId } = req.body;
+        const { username, role, interviewId } = req.body;
         if (!username) {
             return res.status(400).json({ error: 'Username is required' });
         }
 
-        latestActiveCandidateSession = {
+        const user = await User.findOne({ username });
+        const userRole = role || user?.role || 'candidate';
+        let finalInterviewId = interviewId;
+
+        // If candidate and no interviewId supplied, check database or auto-provision
+        if (userRole === 'candidate' && !finalInterviewId) {
+            if (user) {
+                const existingInt = await Interview.findOne({ candidateId: user._id, status: { $ne: 'cancelled' } }).sort({ date: -1 });
+                if (existingInt) {
+                    finalInterviewId = String(existingInt._id);
+                } else {
+                    const newInt = await Interview.create({
+                        candidateId: user._id,
+                        jobRole: user.jobTitle || 'Software Engineer',
+                        status: 'scheduled',
+                        questions: [],
+                        trustScore: 100
+                    });
+                    finalInterviewId = String(newInt._id);
+                    console.log(`[LAUNCH] Auto-created interview ${finalInterviewId} for candidate ${username}`);
+                }
+            }
+        }
+
+        latestActiveTerminalSession = {
             username,
-            interviewId: interviewId || null,
+            role: userRole,
+            interviewId: finalInterviewId || null,
+            fullname: user?.fullname || username,
             timestamp: Date.now()
         };
 
         const electronDir = path.join(__dirname, '..', 'electron-client');
-        console.log(`[LAUNCH] Spawning Electron exam terminal for "${username}" (interview: ${interviewId || 'none'})...`);
+        const electronExe = path.join(electronDir, 'node_modules', 'electron', 'dist', 'electron.exe');
+        console.log(`[LAUNCH] Spawning Electron terminal for "${username}" (role: ${userRole}, interview: ${finalInterviewId || 'none'})...`);
 
-        // Spawn Electron with session arguments so candidate is automatically logged in
-        const spawnCmd = `set PATH=%PATH%;C:\\Program Files\\nodejs;C:\\Program Files (x86)\\nodejs && npm start -- --user="${username}" --interview="${interviewId || ''}"`;
-        const child = spawn('cmd.exe', ['/c', spawnCmd], {
-            cwd: electronDir,
-            detached: true,
-            stdio: 'ignore'
-        });
+        let child;
+        if (fs.existsSync(electronExe)) {
+            // Direct launch of Electron binary — fast, reliable, bypasses shell escaping
+            child = spawn(electronExe, ['.', `--user=${username}`, `--role=${userRole}`, `--interview=${finalInterviewId || ''}`], {
+                cwd: electronDir,
+                detached: true,
+                stdio: 'ignore'
+            });
+        } else {
+            // Fallback via npm start
+            const spawnCmd = `set PATH=%PATH%;C:\\Program Files\\nodejs;C:\\Program Files (x86)\\nodejs && npm start -- --user="${username}" --role="${userRole}" --interview="${finalInterviewId || ''}"`;
+            child = spawn('cmd.exe', ['/c', spawnCmd], {
+                cwd: electronDir,
+                detached: true,
+                stdio: 'ignore'
+            });
+        }
         child.unref();
 
-        res.json({ success: true, message: 'Electron terminal launched successfully' });
+        res.json({
+            success: true,
+            message: 'Electron terminal launched successfully',
+            session: latestActiveTerminalSession
+        });
     } catch (err) {
         console.error('[LAUNCH] Error launching electron:', err);
         res.status(500).json({ error: 'Failed to launch Electron terminal: ' + err.message });
     }
 });
 
-app.get('/api/candidate/active-session', (req, res) => {
-    if (!latestActiveCandidateSession) {
+app.get('/api/auth/terminal-session', (req, res) => {
+    if (!latestActiveTerminalSession) {
         return res.json({ active: false });
     }
-    // Expire session after 15 minutes if not used
-    if (Date.now() - latestActiveCandidateSession.timestamp > 900000) {
-        latestActiveCandidateSession = null;
+    if (Date.now() - latestActiveTerminalSession.timestamp > 900000) {
+        latestActiveTerminalSession = null;
         return res.json({ active: false });
     }
-    res.json({ active: true, session: latestActiveCandidateSession });
+    res.json({ active: true, session: latestActiveTerminalSession });
 });
 
-// ─── Real-Time AI Proctor Frame Analysis (Gemini Multimodal Vision) ───────────
+app.get('/api/candidate/active-session', (req, res) => {
+    if (!latestActiveTerminalSession) {
+        return res.json({ active: false });
+    }
+    if (Date.now() - latestActiveTerminalSession.timestamp > 900000) {
+        latestActiveTerminalSession = null;
+        return res.json({ active: false });
+    }
+    res.json({ active: true, session: latestActiveTerminalSession });
+});
+
+// ─── Real-Time AI Proctor Frame Analysis (Gemini Multimodal Vision — Accuracy-Optimized) ──
+
+// Temporal smoothing state: track consecutive anomaly counts per room
+const roomAnomalyHistory = new Map(); // roomId → { lastAnomalyType, consecutiveCount, lastAlertTime }
+
+function getRoomHistory(roomId) {
+    if (!roomAnomalyHistory.has(roomId)) {
+        roomAnomalyHistory.set(roomId, {
+            lastAnomalyType: null,
+            consecutiveCount: 0,
+            lastAlertTime: 0,
+            lastNormalCount: 0
+        });
+    }
+    return roomAnomalyHistory.get(roomId);
+}
+
+// Minimum consecutive anomaly frames before triggering an alert
+const CONSECUTIVE_THRESHOLD = 2;
+// Minimum confidence to act on a result
+const CONFIDENCE_THRESHOLD = 0.80;
+// Cooldown between alerts of the same type (ms)
+const ALERT_COOLDOWN_MS = 25000;
+
 app.post('/api/proctor/analyze-frame', async (req, res) => {
     try {
         const { image, roomId } = req.body;
@@ -1135,42 +1243,58 @@ app.post('/api/proctor/analyze-frame', async (req, res) => {
             return res.json({
                 hasGemini: false,
                 analyzed: false,
-                message: 'Gemini API key not configured. Using client-side detection.'
+                message: 'Gemini API key not configured in .env'
             });
         }
 
         const base64Data = image.replace(/^data:image\/\w+;base64,/, '');
 
-        const prompt = `You are an AI exam proctor monitoring a candidate's webcam in an examination.
-Analyze this frame strictly:
-1. Count the number of human faces visible (faceCount).
-2. Check if the candidate's eyes or head are looking significantly away from the screen (lookingAway).
-3. Check for any unauthorized objects like mobile phones, books, notes, earbuds (suspiciousObjects).
-4. Rules:
-   - If faceCount == 0: alert = "Face Not Detected", severity = "high"
-   - If faceCount > 1: alert = "Multiple Faces Detected", severity = "high"
-   - If lookingAway == true: alert = "Looking Away from Screen", severity = "medium"
-   - If suspiciousObjects is not empty: alert = "Unauthorized Object Detected", severity = "high"
-   - If faceCount == 1 and looking forward and no suspicious items: alert = null, severity = null
+        // ── PHASE 1: Fast analysis with lightweight model ──────────────────
+        const analysisPrompt = `You are an expert, highly accurate AI exam proctor analyzing a candidate's webcam feed during an online exam.
 
-Respond ONLY with valid JSON in this exact structure:
-{"faceCount": 1, "faceDetected": true, "lookingAway": false, "suspiciousObjects": [], "alert": null, "severity": null, "confidence": 0.95}`;
+REAL-WORLD CONTEXT:
+The candidate is sitting at a computer solving problems. Natural behaviors such as blinking, glancing at the keyboard while typing, reading across different areas of the monitor, slight head tilts, adjusting spectacles, touching face/chin, or shifting posture in their chair are 100% NORMAL and MUST NEVER BE FLAGGED.
 
+Analyze this frame with high precision:
+1. faceCount (integer): Number of distinct real human faces clearly visible. Count ONLY real people physically present. Shadows, monitor reflections, glasses reflections, or wall posters do NOT count. Normal single candidate = 1.
+2. faceDetected (boolean): true if the candidate is present in front of the camera (even if slightly off-center or tilted). Only set false if the candidate has completely walked away or left the desk empty.
+3. lookingAway (boolean): true ONLY if the candidate's head is turned severely away from the computer (more than ~65-70 degrees, clearly looking backwards, sideways, or talking to someone off-camera). Looking down at keys, writing on a scratchpad, or reading the screen is NORMAL (lookingAway: false).
+4. guestDetected (boolean): true ONLY if a second distinct person is clearly standing or sitting beside the candidate aiding them.
+5. suspiciousObjects (array of strings): List ONLY clearly visible unauthorized cheat devices actively in use: "mobile_phone" (holding/looking at phone), "earphones" (earbuds in ear), "cheat_sheets" (unauthorized paper notes being read). Empty array [] if clean. Pens, water bottles, spectacles, mouse, headphones if required are clean.
+6. motionAnomaly (boolean): true ONLY for wild, erratic, or suspicious dodging behavior. Normal movements are false.
+7. lightingCondition: "normal" (clear/visible), "dark" (dim room, face still visible), or "obstructed" (camera lens physically taped, covered, or pitch black).
+
+Respond with valid JSON:
+{
+  "faceCount": 1,
+  "faceDetected": true,
+  "lookingAway": false,
+  "guestDetected": false,
+  "suspiciousObjects": [],
+  "motionAnomaly": false,
+  "lightingCondition": "normal",
+  "confidence": 0.95
+}
+
+Be conservative, accurate, and fair. Prioritize high accuracy and avoid false alarms.`;
+
+        // Use gemini-2.0-flash for fast initial screening
+        const fastModel = 'gemini-2.5-flash';
         const geminiRes = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`,
+            `https://generativelanguage.googleapis.com/v1beta/models/${fastModel}:generateContent?key=${GEMINI_KEY}`,
             {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     contents: [{
                         parts: [
-                            { text: prompt },
+                            { text: analysisPrompt },
                             { inline_data: { mime_type: 'image/jpeg', data: base64Data } }
                         ]
                     }],
                     generationConfig: {
                         response_mime_type: "application/json",
-                        temperature: 0.1
+                        temperature: 0.05
                     }
                 })
             }
@@ -1183,45 +1307,209 @@ Respond ONLY with valid JSON in this exact structure:
 
         const data = await geminiRes.json();
         const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-        const result = JSON.parse(rawText);
+        const cleaned = cleanJsonText(rawText);
+        const result = JSON.parse(cleaned);
 
-        // If an anomaly was detected, immediately broadcast it to the proctor room
-        if (result.alert && roomId) {
-            const eventCode = result.faceCount === 0 ? 'no_face' :
-                              result.faceCount > 1 ? 'multiple_faces' :
-                              result.lookingAway ? 'off_screen_gaze' : 'suspicious_material';
-
-            const penalty = result.severity === 'high' ? 10 : 5;
-            const updated = await Interview.findByIdAndUpdate(
-                roomId,
-                { $inc: { trustScore: -penalty } },
-                { new: true }
-            );
-
-            const newLog = await Log.create({
-                interviewId: roomId,
-                anomalyType: eventCode,
-                severity: result.severity || 'medium',
-                confidence: result.confidence || 0.95,
-                details: `AI Vision: ${result.alert}. ${result.suspiciousObjects?.length ? 'Items: ' + result.suspiciousObjects.join(', ') : ''}`
+        // ── Confidence gating: ignore low-confidence results ──────────────
+        const confidence = Number(result.confidence) || 0.5;
+        if (confidence < CONFIDENCE_THRESHOLD) {
+            return res.json({
+                success: true, hasGemini: true, analyzed: true,
+                result: { ...result, alert: null, severity: null, penalty: 0, eventCode: null, skipped: 'low_confidence' }
             });
+        }
 
-            proctorNamespace.to(String(roomId)).emit('proctor_alert', {
-                roomId: String(roomId),
-                event: eventCode,
-                severity: result.severity || 'medium',
-                confidence: result.confidence || 0.95,
-                logId: newLog._id,
-                details: newLog.details,
-                timestamp: newLog.timestamp
-            });
+        // ── Determine if there's a violation ──────────────────────────────
+        let eventCode = null;
+        let alert = null;
+        let severity = null;
+        let penalty = 0;
 
-            if (updated) {
-                proctorNamespace.to(String(roomId)).emit('score_update', {
-                    roomId: String(roomId),
-                    score: Math.max(0, updated.trustScore)
-                });
+        if (result.lightingCondition === 'obstructed') {
+            eventCode = 'camera_obstructed'; alert = 'Camera appears obstructed or covered'; severity = 'high'; penalty = 10;
+        } else if (result.faceCount === 0 || result.faceDetected === false) {
+            eventCode = 'no_face'; alert = 'Face not detected — candidate may be away from camera'; severity = 'high'; penalty = 10;
+        } else if (result.faceCount > 1 || result.guestDetected === true) {
+            eventCode = 'multiple_faces'; alert = 'Additional person may be present in frame'; severity = 'high'; penalty = 10;
+        } else if (result.suspiciousObjects && result.suspiciousObjects.length > 0) {
+            eventCode = 'suspicious_material'; alert = 'Possible unauthorized material: ' + result.suspiciousObjects.join(', '); severity = 'high'; penalty = 10;
+        } else if (result.lookingAway === true) {
+            eventCode = 'off_screen_gaze'; alert = 'Candidate looking significantly away from screen'; severity = 'medium'; penalty = 5;
+        } else if (result.motionAnomaly === true) {
+            eventCode = 'abnormal_movement'; alert = 'Unusual movement pattern detected'; severity = 'medium'; penalty = 5;
+        }
+
+        // ── Temporal smoothing: require consecutive frames ────────────────
+        const history = getRoomHistory(roomId || 'default');
+        const now = Date.now();
+
+        if (eventCode) {
+            // Same anomaly as last frame? Increment counter
+            if (history.lastAnomalyType === eventCode) {
+                history.consecutiveCount++;
+            } else {
+                // Different anomaly or first occurrence — reset
+                history.lastAnomalyType = eventCode;
+                history.consecutiveCount = 1;
             }
+            history.lastNormalCount = 0;
+
+            // Only alert if we've seen this anomaly for CONSECUTIVE_THRESHOLD frames in a row
+            if (history.consecutiveCount < CONSECUTIVE_THRESHOLD) {
+                // Not enough consecutive detections — suppress alert
+                result.alert = null;
+                result.severity = null;
+                result.penalty = 0;
+                result.eventCode = null;
+                result.suppressed = `Waiting for ${CONSECUTIVE_THRESHOLD - history.consecutiveCount} more confirmations`;
+
+                return res.json({ success: true, hasGemini: true, analyzed: true, result });
+            }
+
+            // Check cooldown — don't spam the same alert type
+            if (now - history.lastAlertTime < ALERT_COOLDOWN_MS) {
+                result.alert = null;
+                result.severity = null;
+                result.penalty = 0;
+                result.eventCode = null;
+                result.suppressed = 'Alert cooldown active';
+
+                return res.json({ success: true, hasGemini: true, analyzed: true, result });
+            }
+
+            // ── PHASE 2: For high-severity alerts, verify with a more accurate model ──
+            let verified = true;
+            if (severity === 'high') {
+                try {
+                    const verifyModel = 'gemini-2.5-flash';
+                    const verifyPrompt = `You are verifying a potential exam proctoring violation flagged by an initial AI scan.
+
+The initial scan detected: "${alert}"
+Event: ${eventCode}, Confidence: ${confidence}
+
+Please re-analyze this webcam frame carefully. The candidate is taking an online exam at their desk.
+
+Answer these specific questions:
+1. How many distinct real human faces are clearly visible? (Do NOT count reflections, posters, or shadows)
+2. Is the candidate's face visible and looking generally toward their screen?
+3. Are there any clearly unauthorized items actively being used (phone in hand, earbuds in ears, notes being read)?
+
+Based on your analysis, is this violation CONFIRMED or is it a FALSE POSITIVE?
+
+Respond with JSON:
+{
+  "confirmed": true/false,
+  "actualFaceCount": number,
+  "reasoning": "Brief explanation",
+  "confidence": 0.0-1.0
+}`;
+
+                    const verifyRes = await fetch(
+                        `https://generativelanguage.googleapis.com/v1beta/models/${verifyModel}:generateContent?key=${GEMINI_KEY}`,
+                        {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                contents: [{
+                                    parts: [
+                                        { text: verifyPrompt },
+                                        { inline_data: { mime_type: 'image/jpeg', data: base64Data } }
+                                    ]
+                                }],
+                                generationConfig: {
+                                    response_mime_type: "application/json",
+                                    temperature: 0.05
+                                }
+                            })
+                        }
+                    );
+
+                    if (verifyRes.ok) {
+                        const verifyData = await verifyRes.json();
+                        const verifyText = verifyData.candidates?.[0]?.content?.parts?.[0]?.text;
+                        if (verifyText) {
+                            const verifyResult = JSON.parse(cleanJsonText(verifyText));
+                            if (verifyResult.confirmed === false || (Number(verifyResult.confidence) || 0) < 0.70) {
+                                verified = false;
+                                console.log(`[PROCTOR-AI] High-severity alert "${eventCode}" was NOT confirmed by verification model. Suppressing.`);
+                            } else {
+                                console.log(`[PROCTOR-AI] High-severity alert "${eventCode}" CONFIRMED by verification model.`);
+                            }
+                        }
+                    }
+                } catch (verifyErr) {
+                    // Verification failed — proceed with caution, still allow the alert
+                    console.warn('[PROCTOR-AI] Verification model call failed:', verifyErr.message);
+                }
+            }
+
+            if (!verified) {
+                // Verification model says false positive — suppress
+                history.consecutiveCount = 0;
+                history.lastAnomalyType = null;
+                result.alert = null;
+                result.severity = null;
+                result.penalty = 0;
+                result.eventCode = null;
+                result.suppressed = 'Verification model rejected — false positive';
+
+                return res.json({ success: true, hasGemini: true, analyzed: true, result });
+            }
+
+            // ── CONFIRMED ALERT — broadcast to room ──────────────────────
+            history.lastAlertTime = now;
+
+            result.alert = alert;
+            result.severity = severity;
+            result.penalty = penalty;
+            result.eventCode = eventCode;
+
+            if (roomId) {
+                const detailsText = `AI Proctor: ${alert}.${result.suspiciousObjects?.length ? ' Items: ' + result.suspiciousObjects.join(', ') : ''}`;
+                const newLog = await Log.create({
+                    interviewId: roomId,
+                    anomalyType: eventCode,
+                    severity: severity,
+                    confidence: confidence,
+                    details: detailsText.trim()
+                });
+
+                // Apply penalty to trust score (server is the single source of truth)
+                const updated = await Interview.findByIdAndUpdate(
+                    roomId,
+                    { $inc: { trustScore: -penalty } },
+                    { new: true }
+                );
+
+                proctorNamespace.to(String(roomId)).emit('proctor_alert', {
+                    roomId: String(roomId),
+                    event: eventCode,
+                    severity: severity,
+                    confidence: confidence,
+                    logId: newLog._id,
+                    details: newLog.details,
+                    timestamp: newLog.timestamp,
+                    source: 'gemini_ai'
+                });
+
+                if (updated) {
+                    proctorNamespace.to(String(roomId)).emit('score_update', {
+                        roomId: String(roomId),
+                        score: Math.max(0, updated.trustScore)
+                    });
+                }
+            }
+        } else {
+            // Normal frame — reset anomaly tracking
+            history.lastNormalCount++;
+            if (history.lastNormalCount >= 2) {
+                history.lastAnomalyType = null;
+                history.consecutiveCount = 0;
+            }
+            result.alert = null;
+            result.severity = null;
+            result.penalty = 0;
+            result.eventCode = null;
         }
 
         res.json({ success: true, hasGemini: true, analyzed: true, result });

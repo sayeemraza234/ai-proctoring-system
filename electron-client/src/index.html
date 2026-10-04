@@ -9,6 +9,22 @@
 </head>
 <body>
 
+<!-- GLOBAL EXIT BAR (Always accessible from application launch) -->
+<div id="global-exit-bar" class="global-exit-bar">
+    <div class="global-status-pill">
+        <span class="pulse-dot"></span>
+        <span id="global-status-text">ProctorAI Terminal</span>
+    </div>
+    <button id="global-exit-btn" class="global-exit-btn" onclick="exitApplication()" title="Exit application immediately">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+        <span>Exit Application</span>
+    </button>
+</div>
+
+
 <!-- ─── SCREEN 1: LOGIN ─────────────────────────────────────────────── -->
 <div id="screen-login" class="screen active">
     <div class="login-bg">
@@ -38,6 +54,9 @@
             </button>
 
             <p class="login-note">🔒 This is a secure, monitored environment. All activity is recorded.</p>
+            <button type="button" class="btn-login-exit" onclick="exitApplication()">
+                ✕ Exit Application
+            </button>
         </div>
     </div>
 </div>
@@ -115,15 +134,58 @@
                 </ul>
             </div>
 
-            <button id="start-exam-btn" class="btn-primary disabled" disabled onclick="beginExam()">
-                🔒 Lock Screen & Begin Exam
-            </button>
+            <div id="interviewer-ready-notice" class="interviewer-ready-notice hidden" role="status">
+                The interviewer has not started the interview yet.
+            </div>
+
+            <!-- Camera Troubleshooting Notice (displayed if camera check fails) -->
+            <div id="syscheck-camera-help" class="camera-help-alert hidden">
+                <div class="camera-help-title">⚠️ Camera Not Detected or Access Denied</div>
+                <div class="camera-help-body">
+                    Please ensure your webcam is connected and not used by another application. Click <strong>Retry Camera & Checks</strong> or <strong>Exit Application</strong>.
+                </div>
+            </div>
+
+            <!-- Action Controls -->
+            <div class="syscheck-action-buttons">
+                <button id="start-exam-btn" class="btn-primary disabled" disabled onclick="beginExam()">
+                    🔒 Lock Screen & Begin Exam
+                </button>
+                <div class="syscheck-secondary-row">
+                    <button type="button" id="retry-checks-btn" class="btn-retry" onclick="runSystemChecks()">
+                        🔄 Retry Camera & Checks
+                    </button>
+                    <button type="button" id="syscheck-exit-btn" class="btn-syscheck-exit" onclick="exitApplication()">
+                        ✕ Exit Application
+                    </button>
+                </div>
+            </div>
         </div>
     </div>
 </div>
 
 <!-- ─── SCREEN 3: EXAM (KIOSK) ─────────────────────────────────────── -->
 <div id="screen-exam" class="screen">
+    <!-- Emergency Exit Button (always visible, top-left corner) -->
+    <button id="emergency-exit-btn" class="emergency-exit-btn" onclick="showEmergencyExitModal()" title="Emergency Exit">
+        🚪
+    </button>
+
+    <!-- Emergency Exit Confirmation Modal -->
+    <div id="emergency-exit-modal" class="emergency-exit-modal hidden">
+        <div class="emergency-exit-card">
+            <div class="emergency-exit-icon">⚠️</div>
+            <h3>Emergency Exit</h3>
+            <p>This will immediately end your exam session and close the application. Your answers may not be saved.</p>
+            <p class="emergency-exit-warn">Type <strong>EXIT</strong> below to confirm:</p>
+            <input id="emergency-exit-input" type="text" placeholder="Type EXIT to confirm" autocomplete="off" spellcheck="false">
+            <div class="emergency-exit-actions">
+                <button class="btn-cancel" onclick="hideEmergencyExitModal()">Cancel</button>
+                <button class="btn-emergency-confirm" onclick="confirmEmergencyExit()">Exit Now</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Top Bar -->
     <div class="exam-topbar">
         <div class="topbar-left">
@@ -282,22 +344,6 @@
 </div>
 
 <script src="http://localhost:5000/socket.io/socket.io.js"></script>
-<script>
-  // Load simple-peer: try local node_modules first, then CDN fallback
-  (function() {
-    var localPath = '../node_modules/simple-peer/simplepeer.min.js';
-    var cdnPath = 'https://cdn.jsdelivr.net/npm/simple-peer@9.11.1/simplepeer.min.js';
-    var s = document.createElement('script');
-    s.src = localPath;
-    s.onerror = function() {
-      console.warn('[SimplePeer] Local file not found, loading from CDN...');
-      var s2 = document.createElement('script');
-      s2.src = cdnPath;
-      document.head.appendChild(s2);
-    };
-    document.head.appendChild(s);
-  })();
-</script>
 <script src="renderer.js"></script>
 </body>
 </html>

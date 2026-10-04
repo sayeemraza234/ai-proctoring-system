@@ -33,3 +33,8 @@ Thumbs.db
 *.njsproj
 *.sln
 *.sw?
+
+# Backups & Temporary Files
+*.bak
+*.tmp
+*.swp

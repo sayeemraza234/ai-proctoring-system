@@ -27,6 +27,8 @@ let examStartTime = null;
 let timerInterval = null;
 let camStream     = null;
 let examActive    = false;
+let interviewerReady = false;
+let waitingProctorSocket = null;
 
 // ─── Utility ──────────────────────────────────────────────────────────────────
 function showScreen(id) {
@@ -81,6 +83,22 @@ async function doLogin() {
         currentInterview = data.interviewId || data.interview_id;
         questions = data.questions || [];
 
+        // Keep the candidate informed before the secure exam starts.
+        if (currentInterview && typeof io === 'function') {
+            waitingProctorSocket = io(`${API}/proctor`);
+            waitingProctorSocket.on('connect', () => {
+                waitingProctorSocket.emit('join_room', String(currentInterview));
+            });
+            waitingProctorSocket.on('interviewer_started', (event) => {
+                interviewerReady = true;
+                const notice = document.getElementById('interviewer-ready-notice');
+                if (notice) {
+                    notice.textContent = `${event?.interviewerName || 'The interviewer'} is ready. Complete the checks, then enter the exam.`;
+                    notice.classList.remove('hidden');
+                }
+            });
+        }
+
         // Go to system check
         document.getElementById('candidate-name').textContent = data.fullname || data.username;
         showScreen('screen-syscheck');
@@ -95,6 +113,68 @@ async function doLogin() {
         spinner.classList.add('hidden');
     }
 }
+
+// ─── Clean Application Exit Handler ──────────────────────────────────
+function exitApplication() {
+    console.log('[RENDERER] Application exit requested.');
+    if (camStream) {
+        try {
+            camStream.getTracks().forEach(track => track.stop());
+        } catch (e) {}
+        camStream = null;
+    }
+    if (window.electronAPI && typeof window.electronAPI.exitApp === 'function') {
+        window.electronAPI.exitApp();
+    } else if (window.electronAPI && typeof window.electronAPI.emergencyExit === 'function') {
+        window.electronAPI.emergencyExit();
+    } else {
+        window.close();
+    }
+}
+window.exitApplication = exitApplication;
+
+// Global shortcut: Escape or Ctrl+Q to exit before locked exam starts
+window.addEventListener('keydown', (e) => {
+    if (!examActive) {
+        if (e.key === 'Escape' || ((e.ctrlKey || e.metaKey) && (e.key === 'q' || e.key === 'Q'))) {
+            exitApplication();
+        }
+    }
+});
+
+// ─── EMERGENCY EXIT ───────────────────────────────────────────────────────────
+function showEmergencyExitModal() {
+    const modal = document.getElementById('emergency-exit-modal');
+    if (modal) {
+        modal.classList.remove('hidden');
+        const input = document.getElementById('emergency-exit-input');
+        if (input) { input.value = ''; input.focus(); }
+    }
+}
+window.showEmergencyExitModal = showEmergencyExitModal;
+
+function hideEmergencyExitModal() {
+    const modal = document.getElementById('emergency-exit-modal');
+    if (modal) modal.classList.add('hidden');
+}
+window.hideEmergencyExitModal = hideEmergencyExitModal;
+
+function confirmEmergencyExit() {
+    const input = document.getElementById('emergency-exit-input');
+    if (!input || input.value.trim().toUpperCase() !== 'EXIT') {
+        input.style.borderColor = '#EF4444';
+        input.placeholder = 'You must type EXIT to confirm';
+        return;
+    }
+    // Trigger emergency exit via Electron IPC
+    if (window.electronAPI && window.electronAPI.emergencyExit) {
+        window.electronAPI.emergencyExit();
+    } else {
+        // Fallback for non-Electron: just close window
+        window.close();
+    }
+}
+window.confirmEmergencyExit = confirmEmergencyExit;
 
 // Enter on password field
 document.getElementById('login-password').addEventListener('keydown', e => {
@@ -118,14 +198,27 @@ function setCheck(id, state, desc) {
 
 async function runSystemChecks() {
     let allOk = true;
+    const camHelp = document.getElementById('syscheck-camera-help');
+    if (camHelp) camHelp.classList.add('hidden');
+
+    const startBtn = document.getElementById('start-exam-btn');
+    if (startBtn) {
+        startBtn.disabled = true;
+        startBtn.classList.add('disabled');
+    }
 
     // Camera check
     try {
+        if (camStream) {
+            try { camStream.getTracks().forEach(t => t.stop()); } catch (e) {}
+            camStream = null;
+        }
         camStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
         document.getElementById('cam-preview').srcObject = camStream;
         setCheck('camera', 'ok', 'Camera detected and accessible');
     } catch (e) {
         setCheck('camera', 'fail', 'Camera not found or permission denied');
+        if (camHelp) camHelp.classList.remove('hidden');
         allOk = false;
     }
 
@@ -143,12 +236,11 @@ async function runSystemChecks() {
 
     await delay(400);
 
-    // Interview check — proceed if an interview session exists, even with 0 questions
-    // (interviewer can send questions live during the exam)
+    // Interview check – proceed if an interview session exists, even with 0 questions
     if (currentInterview) {
-        const qText = questions.length > 0 ? `${questions.length} question(s) loaded` : 'Session ready — interviewer will send questions live';
+        const qText = questions.length > 0 ? `${questions.length} question(s) loaded` : 'Session ready – interviewer will send questions live';
         setCheck('interview', 'ok', qText);
-        document.getElementById('info-role').textContent = currentUser.jobRole || 'Software Engineer';
+        document.getElementById('info-role').textContent = (currentUser && currentUser.jobRole) || 'Software Engineer';
         document.getElementById('info-qcount').textContent = questions.length > 0 ? questions.length : 'Live (TBD)';
         document.getElementById('info-duration').textContent = '90 minutes';
         document.getElementById('exam-info-box').style.display = 'flex';
@@ -168,10 +260,9 @@ async function runSystemChecks() {
     }
 
     // Enable start button if all checks pass
-    if (allOk) {
-        const btn = document.getElementById('start-exam-btn');
-        btn.disabled = false;
-        btn.classList.remove('disabled');
+    if (allOk && startBtn) {
+        startBtn.disabled = false;
+        startBtn.classList.remove('disabled');
     }
 }
 
@@ -196,6 +287,11 @@ async function beginExam() {
         } catch(e) { console.warn('Could not activate interview:', e); }
     }
 
+    if (waitingProctorSocket) {
+        waitingProctorSocket.disconnect();
+        waitingProctorSocket = null;
+    }
+
     // Connect proctoring socket
     try {
         proctorSocket = io(`${API}/proctor`);
@@ -209,6 +305,48 @@ async function beginExam() {
                 renderQuestion(currentQIndex);
             }
         });
+
+        // Listen for server-authoritative trust score updates
+        proctorSocket.on('score_update', (data) => {
+            if (data && data.score !== undefined) {
+                trustScore = Math.max(0, data.score);
+                updateTrust();
+            }
+        });
+
+        // Listen for proctor alerts broadcast by server (from AI analysis)
+                // Listen for remote interview termination by interviewer
+        proctorSocket.on('interview_terminated', (data) => {
+            console.log('[PROCTOR] Remote interview termination signal received:', data);
+            examActive = false;
+            if (timerInterval) clearInterval(timerInterval);
+            if (camStream) {
+                try { camStream.getTracks().forEach(t => t.stop()); } catch (e) {}
+                camStream = null;
+            }
+            if (proctorSocket) proctorSocket.disconnect();
+            if (signalingSocket) signalingSocket.disconnect();
+            if (peerConnection) peerConnection.destroy();
+
+            const titleEl = document.getElementById('done-title');
+            const descEl = document.getElementById('done-desc');
+            if (titleEl) titleEl.textContent = 'Session Concluded';
+            if (descEl) descEl.textContent = data.reason || 'Your interview session has been concluded by the interviewer.';
+
+            showScreen('screen-done');
+
+            if (window.electronAPI) {
+                window.electronAPI.endInterview();
+            }
+        });
+
+        proctorSocket.on('proctor_alert', (data) => {
+            if (data && data.source === 'gemini_ai') {
+                // AI alerts are already handled visually by the vision loop response
+                // This listener ensures the trust score display is always in sync
+                return;
+            }
+        });
     } catch(e) {}
 
     examActive = true;
@@ -220,6 +358,7 @@ async function beginExam() {
         document.getElementById('cam-large').srcObject = camStream;
         // Start live video call connection
         initWebRTC(camStream);
+        initAudioProctoring(camStream);
     }
 
     // Start timer
@@ -230,97 +369,293 @@ async function beginExam() {
     buildQuestionNav();
     renderQuestion(0);
 
+    // Start strict Gemini AI multimodal vision proctoring!
+    startStrictVisionProctoring();
+
+    // Start abnormal mouse movements detector
+    initMouseProctoring();
+
     // Block all keyboard escape shortcuts (belt + suspenders on top of main process)
     blockKeyboard();
 }
 
-// ─── WebRTC Live Call ──────────────────────────────────────────────────────────
+// ─── Native WebRTC Live Call (Peer-to-Peer + Google STUN + Socket Relay Fallback) ──
+let rtcPeer = null;
+
+const rtcConfig = {
+    iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:stun3.l.google.com:19302' },
+        { urls: 'stun:stun4.l.google.com:19302' }
+    ]
+};
+
 function initWebRTC(localStream) {
     if (!currentInterview) return;
-    
+
     try {
+        if (signalingSocket) signalingSocket.disconnect();
         signalingSocket = io(`${API}/signaling`);
-        let peerStarted = false;
-        
+
         signalingSocket.on('connect', () => {
+            console.log('[RTC] Connected to signaling server, joining room:', currentInterview);
             signalingSocket.emit('join_room', String(currentInterview));
         });
 
-        const createPeer = (initiator) => {
-            if (peerStarted) return;
-            peerStarted = true;
-            if (peerConnection) peerConnection.destroy();
-            
-            const PeerClass = window.SimplePeer || SimplePeer;
-            peerConnection = new PeerClass({
-                initiator,
-                stream: localStream,
-                trickle: false
-            });
+        async function setupPeerConnection(isInitiator) {
+            if (rtcPeer) {
+                try { rtcPeer.close(); } catch(e) {}
+            }
 
-            peerConnection.on('signal', (data) => {
-                signalingSocket.emit(initiator ? 'offer' : 'answer', {
-                    roomId: String(currentInterview),
-                    signal: data
+            rtcPeer = new RTCPeerConnection(rtcConfig);
+
+            // Add local audio and video tracks
+            if (localStream) {
+                localStream.getTracks().forEach(track => {
+                    rtcPeer.addTrack(track, localStream);
                 });
-            });
+            }
 
-            peerConnection.on('stream', (remoteStream) => {
+            // Remote stream arrived
+            rtcPeer.ontrack = (event) => {
+                console.log('[RTC] Candidate received interviewer stream track:', event.track.kind);
+                const remoteStream = event.streams[0] || new MediaStream([event.track]);
                 const interviewerVideo = document.getElementById('interviewer-video');
                 if (interviewerVideo) {
                     interviewerVideo.srcObject = remoteStream;
-                    interviewerVideo.play().catch(console.error);
-                    
+                    interviewerVideo.style.display = 'block';
+                    interviewerVideo.play().catch(e => console.warn('Autoplay prevented:', e));
                     const placeholder = document.getElementById('interviewer-placeholder');
                     if (placeholder) placeholder.classList.add('hidden');
+                    const relayImg = document.getElementById('interviewer-relay-img');
+                    if (relayImg) relayImg.style.display = 'none';
                 }
-            });
+            };
 
-            peerConnection.on('error', (err) => console.error('Peer connection error:', err));
-        };
+            rtcPeer.onicecandidate = (event) => {
+                if (event.candidate) {
+                    signalingSocket.emit('ice_candidate', {
+                        roomId: String(currentInterview),
+                        candidate: event.candidate
+                    });
+                }
+            };
 
-        // The candidate is the only initiator. This avoids offer/answer races
-        // when both clients enter the room at nearly the same time.
-        signalingSocket.on('user_joined', () => createPeer(true));
-        signalingSocket.on('peer_present', () => createPeer(true));
+            rtcPeer.onconnectionstatechange = () => {
+                console.log('[RTC] Connection state:', rtcPeer.connectionState);
+            };
 
-        signalingSocket.on('offer', (data) => {
-            if (peerStarted) return;
-            const PeerClass = window.SimplePeer || SimplePeer;
-            peerConnection = new PeerClass({
-                initiator: false,
-                stream: localStream,
-                trickle: false
-            });
+            if (isInitiator) {
+                try {
+                    const offer = await rtcPeer.createOffer({
+                        offerToReceiveAudio: true,
+                        offerToReceiveVideo: true
+                    });
+                    await rtcPeer.setLocalDescription(offer);
+                    signalingSocket.emit('offer', {
+                        roomId: String(currentInterview),
+                        signal: offer
+                    });
+                    console.log('[RTC] Sent offer to interviewer');
+                } catch (err) {
+                    console.error('[RTC] Error creating offer:', err);
+                }
+            }
+        }
 
-            peerConnection.on('signal', (d) => {
+        signalingSocket.on('peer_present', () => setupPeerConnection(true));
+        signalingSocket.on('user_joined', () => setupPeerConnection(true));
+
+        signalingSocket.on('offer', async (data) => {
+            console.log('[RTC] Received offer from interviewer');
+            await setupPeerConnection(false);
+            try {
+                const sdp = data.signal || data;
+                await rtcPeer.setRemoteDescription(new RTCSessionDescription(sdp));
+                const answer = await rtcPeer.createAnswer();
+                await rtcPeer.setLocalDescription(answer);
                 signalingSocket.emit('answer', {
                     roomId: String(currentInterview),
-                    signal: d
+                    signal: answer
                 });
-            });
+                console.log('[RTC] Sent answer to interviewer');
+            } catch (err) {
+                console.error('[RTC] Error answering offer:', err);
+            }
+        });
 
-            peerConnection.on('stream', (remoteStream) => {
-                const interviewerVideo = document.getElementById('interviewer-video');
-                if (interviewerVideo) {
-                    interviewerVideo.srcObject = remoteStream;
-                    interviewerVideo.play().catch(console.error);
-                    
-                    const placeholder = document.getElementById('interviewer-placeholder');
-                    if (placeholder) placeholder.classList.add('hidden');
+        signalingSocket.on('answer', async (data) => {
+            console.log('[RTC] Received answer from interviewer');
+            if (rtcPeer) {
+                try {
+                    const sdp = data.signal || data;
+                    await rtcPeer.setRemoteDescription(new RTCSessionDescription(sdp));
+                } catch (err) {
+                    console.error('[RTC] Error setting remote description:', err);
                 }
-            });
-
-            peerConnection.signal(data.signal);
+            }
         });
 
-        signalingSocket.on('answer', (data) => {
-            if (peerConnection) peerConnection.signal(data.signal);
+        signalingSocket.on('ice_candidate', async (data) => {
+            if (rtcPeer && data.candidate) {
+                try {
+                    await rtcPeer.addIceCandidate(new RTCIceCandidate(data.candidate));
+                } catch (err) {
+                    console.warn('[RTC] Error adding ICE candidate:', err);
+                }
+            }
         });
+
+        // Fail-safe frame relay: if interviewer video is relayed over socket
+        signalingSocket.on('remote_frame', (data) => {
+            if (data && data.image) {
+                let imgEl = document.getElementById('interviewer-relay-img');
+                const placeholder = document.getElementById('interviewer-placeholder');
+                if (placeholder) placeholder.classList.add('hidden');
+
+                if (!imgEl) {
+                    imgEl = document.createElement('img');
+                    imgEl.id = 'interviewer-relay-img';
+                    imgEl.style.cssText = 'width:100%;height:100%;object-fit:cover;position:absolute;top:0;left:0;border-radius:10px;z-index:2;';
+                    const wrap = document.querySelector('.interviewer-video-wrap');
+                    if (wrap) wrap.appendChild(imgEl);
+                }
+                imgEl.style.display = 'block';
+                imgEl.src = data.image;
+            }
+        });
+
+        // Periodic candidate frame relay every 1.5s as fail-safe fallback
+        setInterval(() => {
+            if (!examActive || !camStream) return;
+            const canvas = document.getElementById('vision-canvas');
+            const video = document.getElementById('cam-thumb');
+            if (canvas && video && video.readyState >= 2) {
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                const frameData = canvas.toDataURL('image/jpeg', 0.45);
+                signalingSocket.emit('relay_frame', {
+                    roomId: String(currentInterview),
+                    role: 'candidate',
+                    image: frameData
+                });
+            }
+        }, 1500);
 
     } catch (e) {
         console.error('WebRTC initialization failed:', e);
     }
+}
+
+// ─── AUDIO & SPEECH PROCTORING SENSOR ─────────────────────────────────────────
+let audioContext = null;
+let speechCooldown = 0;
+
+function initAudioProctoring(stream) {
+    try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx || !stream) return;
+        audioContext = new AudioCtx();
+        const source = audioContext.createMediaStreamSource(stream);
+        const analyser = audioContext.createAnalyser();
+        analyser.fftSize = 256;
+        source.connect(analyser);
+
+        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+        let sustainedLoudCount = 0;
+        let lastAudioAlert = 0;
+
+        setInterval(() => {
+            if (!examActive) return;
+            analyser.getByteFrequencyData(dataArray);
+            let sum = 0;
+            for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+            const avgVolume = sum / dataArray.length;
+
+            // Threshold raised to 75 to ignore typing, fan hum, and background breathing
+            if (avgVolume > 75) {
+                sustainedLoudCount++;
+                // Require 3 consecutive loud detections (sustained voice > 3.5s)
+                if (sustainedLoudCount >= 3 && Date.now() - lastAudioAlert > 25000) {
+                    lastAudioAlert = Date.now();
+                    sustainedLoudCount = 0;
+                    handleProctoringEvent({
+                        event: 'speech_detected',
+                        severity: 'low',
+                        confidence: 0.85,
+                        text: 'Notice: Moderate background voice or audio detected in room.'
+                    });
+                }
+            } else {
+                sustainedLoudCount = Math.max(0, sustainedLoudCount - 1);
+            }
+        }, 1200);
+        console.log('🎤 Real-time audio proctoring analyzer active (calibrated).');
+    } catch (e) {
+        console.warn('Audio proctoring could not initialize:', e);
+    }
+}
+
+// ─── ABNORMAL MOUSE MOVEMENTS SENSOR ──────────────────────────────────────────
+function initMouseProctoring() {
+    let lastX = null, lastY = null, lastT = null;
+    let rapidCount = 0;
+    let mouseAlertCooldown = 0;
+
+    window.addEventListener('mousemove', (e) => {
+        if (!examActive) return;
+        const now = Date.now();
+        if (lastX !== null && lastT !== null) {
+            const dt = (now - lastT) || 1;
+            const dist = Math.hypot(e.clientX - lastX, e.clientY - lastY);
+            const speed = dist / dt;
+
+            // Only flag truly erratic, continuous shaking movements (not normal fast gestures)
+            if (speed > 8.0 && dt < 25) {
+                rapidCount++;
+                if (rapidCount > 12 && now - mouseAlertCooldown > 20000) {
+                    mouseAlertCooldown = now;
+                    rapidCount = 0;
+                    handleProctoringEvent({
+                        event: 'abnormal_mouse_movement',
+                        severity: 'low',
+                        confidence: 0.75,
+                        text: 'Notice: Rapid mouse movement detected.'
+                    });
+                }
+            } else if (rapidCount > 0) {
+                rapidCount = Math.max(0, rapidCount - 1);
+            }
+        }
+        lastX = e.clientX;
+        lastY = e.clientY;
+        lastT = now;
+    });
+
+    // NOTE: mouseleave removed - moving cursor near edges in kiosk is NOT malpractice
+
+    window.addEventListener('blur', () => {
+        if (!examActive) return;
+        handleProctoringEvent({
+            event: 'window_switch_attempt',
+            severity: 'high',
+            confidence: 1.0,
+            text: 'Window switch / Alt+Tab attempt detected.'
+        });
+    });
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden && examActive) {
+            handleProctoringEvent({
+                event: 'window_switch_attempt',
+                severity: 'high',
+                confidence: 1.0,
+                text: 'Exam terminal lost focus / switched window.'
+            });
+        }
+    });
 }
 
 // ─── KIOSK KEYBOARD BLOCK ─────────────────────────────────────────────────────
@@ -333,6 +668,7 @@ function blockKeyboard() {
         // Always block
         if (
             e.altKey ||                            // Alt+Tab, Alt+F4
+            (e.ctrlKey && ['c', 'v', 'x'].includes(e.key.toLowerCase())) ||
             (e.ctrlKey && e.key !== 'a' && e.key !== 'z' && !isInput) ||
             e.key === 'Escape' ||
             e.key === 'F11' ||
@@ -343,7 +679,8 @@ function blockKeyboard() {
         ) {
             e.preventDefault();
             e.stopPropagation();
-            logAnomaly('keyboard_shortcut_attempt', 'medium');
+            const clipboardAction = e.ctrlKey && ['c', 'v', 'x'].includes(e.key.toLowerCase());
+            logAnomaly(clipboardAction ? `${e.key.toLowerCase()}_attempt` : 'keyboard_shortcut_attempt', clipboardAction ? 'high' : 'medium');
             return false;
         }
     }, true);
@@ -439,13 +776,39 @@ function renderQuestion(idx) {
         document.getElementById('code-section').classList.remove('hidden');
         document.getElementById('code-lang-label').textContent = (q.language || 'javascript').charAt(0).toUpperCase() + (q.language || 'javascript').slice(1);
         const editor = document.getElementById('code-editor');
-        editor.value = answers[q._id] !== undefined ? answers[q._id] : (q.starterCode || '');
-        editor.oninput = () => { answers[q._id] = editor.value; markAnswered(idx); };
+        // Keep the candidate workspace blank. Question examples belong in the
+        // prompt, never in the submitted answer.
+        editor.value = answers[q._id] !== undefined ? answers[q._id] : '';
+        editor.oninput = () => {
+            answers[q._id] = editor.value;
+            markAnswered(idx);
+            if (proctorSocket && currentInterview) {
+                proctorSocket.emit('answer_update', {
+                    roomId: String(currentInterview),
+                    questionId: q._id,
+                    questionIndex: idx,
+                    answer: editor.value,
+                    answerType: 'code'
+                });
+            }
+        };
     } else {
         document.getElementById('text-section').classList.remove('hidden');
         const ta = document.getElementById('text-answer');
         ta.value = answers[q._id] || '';
-        ta.oninput = () => { answers[q._id] = ta.value; markAnswered(idx); };
+        ta.oninput = () => {
+            answers[q._id] = ta.value;
+            markAnswered(idx);
+            if (proctorSocket && currentInterview) {
+                proctorSocket.emit('answer_update', {
+                    roomId: String(currentInterview),
+                    questionId: q._id,
+                    questionIndex: idx,
+                    answer: ta.value,
+                    answerType: 'text'
+                });
+            }
+        };
     }
 }
 
@@ -531,10 +894,12 @@ function startStrictVisionProctoring() {
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     const video = document.getElementById('cam-thumb');
+    let consecutiveDarkFrames = 0;
 
+    // Analysis interval: runs every 5 seconds using real Gemini 2.5 Flash Multimodal Vision
     visionInterval = setInterval(async () => {
         if (!examActive || !camStream || isAnalyzingFrame) return;
-        if (!video || video.readyState < 2) return;
+        if (!video || video.readyState < 2 || video.videoWidth === 0) return;
 
         try {
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
@@ -548,18 +913,24 @@ function startStrictVisionProctoring() {
             }
             const avgBrightness = totalBrightness / (pixels.length / 16);
 
-            // If camera is covered or dark (blackout / blocked camera)
-            if (avgBrightness < 12) {
-                handleProctoringEvent({
-                    event: 'no_face',
-                    severity: 'high',
-                    confidence: 1.0,
-                    text: 'Webcam is covered or obstructed. Your face must be clearly visible.'
-                });
+            // Require 3 consecutive pitch-black frames (15s) before flagging camera obstruction
+            if (avgBrightness < 10) {
+                consecutiveDarkFrames++;
+                if (consecutiveDarkFrames >= 3) {
+                    consecutiveDarkFrames = 0;
+                    handleProctoringEvent({
+                        event: 'camera_error',
+                        severity: 'high',
+                        confidence: 0.95,
+                        text: 'Camera appears physically covered or dark. Please ensure your face is well-lit.'
+                    });
+                }
                 return;
+            } else {
+                consecutiveDarkFrames = 0;
             }
 
-            // Send snapshot to backend AI Vision endpoint (Gemini Multimodal)
+            // Send webcam snapshot to backend Gemini Vision endpoint
             isAnalyzingFrame = true;
             const dataUrl = canvas.toDataURL('image/jpeg', 0.65);
             const res = await fetch(`${API}/api/proctor/analyze-frame`, {
@@ -575,16 +946,18 @@ function startStrictVisionProctoring() {
                 const data = await res.json();
                 if (data.analyzed && data.result) {
                     const r = data.result;
-                    if (r.alert) {
-                        const eventCode = r.faceCount === 0 ? 'no_face' :
-                                          r.faceCount > 1 ? 'multiple_faces' :
-                                          r.lookingAway ? 'off_screen_gaze' : 'suspicious_material';
-                        handleProctoringEvent({
-                            event: eventCode,
-                            severity: r.severity || 'high',
-                            confidence: r.confidence || 0.95,
-                            text: r.alert
-                        });
+                    // Server has temporal smoothing & verification - only triggers if confirmed
+                    if (r.alert && r.eventCode) {
+                        showBanner(r.alert);
+                        logAnomaly(r.eventCode, r.severity || 'high', r.alert, r.severity === 'high' ? 'danger' : 'warn');
+                        
+                        if (r.severity === 'high') {
+                            showAlertDialog(
+                                r.eventCode.replace(/_/g, ' ').toUpperCase(),
+                                r.alert,
+                                r.penalty || 10
+                            );
+                        }
                     }
                 }
             }
@@ -593,7 +966,7 @@ function startStrictVisionProctoring() {
         } finally {
             isAnalyzingFrame = false;
         }
-    }, 2800);
+    }, 5000);
 }
 
 function stopStrictVisionProctoring() {
@@ -636,24 +1009,46 @@ function dismissAlertDialog() {
 }
 window.dismissAlertDialog = dismissAlertDialog;
 
+const lastEventTimes = {};
+let alertDialogTimeout = null;
+
 function handleProctoringEvent(log) {
+    if (!log || !log.event) return;
+    if (log.event === 'system_start') {
+        logAnomaly('system_start', 'low', 'AI Proctoring Active', 'info');
+        return;
+    }
+
+    const now = Date.now();
+    // Cooldown per event type to prevent duplicate alert storms (minimum 15s between same events)
+    if (lastEventTimes[log.event] && (now - lastEventTimes[log.event] < 15000)) {
+        return;
+    }
+    lastEventTimes[log.event] = now;
+
     const msgMap = {
-        no_face:                { text: '⚠ Face not visible in camera', title: 'FACE NOT DETECTED', sev: 'danger', penalty: 10 },
-        multiple_faces:         { text: '🔴 Multiple faces detected in frame', title: 'MULTIPLE FACES DETECTED', sev: 'danger', penalty: 15 },
-        off_screen_gaze:        { text: '👁 Looking away from screen', title: 'OFF-SCREEN GAZE DETECTED', sev: 'warn', penalty: 5 },
-        window_switch_attempt:  { text: '🚨 Window / Tab switch attempt blocked', title: 'WINDOW SWITCH ATTEMPT', sev: 'danger', penalty: 15 },
-        keyboard_shortcut_attempt: { text: 'Blocked keyboard shortcut', title: 'KEYBOARD SHORTCUT ATTEMPT', sev: 'warn', penalty: 5 },
-        context_menu_attempt:   { text: 'Right-click blocked', title: 'RIGHT-CLICK ATTEMPT', sev: 'warn', penalty: 2 },
-        suspicious_material:    { text: '🚨 Unauthorized material detected', title: 'UNAUTHORIZED MATERIAL FLAGGED', sev: 'danger', penalty: 20 },
-        system_start:           { text: '✅ AI Proctoring active', title: 'AI MONITORING INITIALIZED', sev: 'info', penalty: 0 },
-        camera_error:           { text: '⚠ Camera offline or unreadable', title: 'CAMERA ACCESS ERROR', sev: 'danger', penalty: 10 },
-        dependency_error:       { text: '⚠ Proctoring engine using client fallback', title: 'PROCTORING NOTICE', sev: 'warn', penalty: 0 },
+        no_face:                { text: 'Face not detected in camera frame', title: 'FACE NOT DETECTED', sev: 'danger', penalty: 8 },
+        multiple_faces:         { text: 'Multiple people detected in camera frame', title: 'MULTIPLE FACES DETECTED', sev: 'danger', penalty: 10 },
+        off_screen_gaze:        { text: 'Candidate looking away from screen', title: 'OFF-SCREEN GAZE', sev: 'warn', penalty: 3 },
+        window_switch_attempt:  { text: 'Window / Tab switch attempt blocked', title: 'WINDOW SWITCH ATTEMPT', sev: 'danger', penalty: 12 },
+        keyboard_shortcut_attempt: { text: 'Blocked keyboard shortcut', title: 'KEYBOARD SHORTCUT ATTEMPT', sev: 'warn', penalty: 2 },
+        context_menu_attempt:   { text: 'Right-click blocked', title: 'RIGHT-CLICK ATTEMPT', sev: 'warn', penalty: 1 },
+        suspicious_material:    { text: 'Unauthorized material or device detected', title: 'UNAUTHORIZED MATERIAL', sev: 'danger', penalty: 15 },
+        speech_detected:        { text: 'Background conversation or audio detected', title: 'AUDIO DETECTED', sev: 'warn', penalty: 2 },
+        abnormal_mouse_movement:{ text: 'Notice: Rapid mouse movement', title: 'RAPID MOUSE MOVEMENT', sev: 'info', penalty: 0 },
+        camera_error:           { text: 'Camera feed obstructed or unreadable', title: 'CAMERA WARNING', sev: 'danger', penalty: 5 }
     };
 
-    const info = msgMap[log.event] || { text: log.text || log.event, title: 'MALPRACTICE WARNING', sev: log.severity === 'high' ? 'danger' : 'warn', penalty: log.severity === 'high' ? 10 : 5 };
+    const info = msgMap[log.event] || {
+        text: log.text || log.event.replace(/_/g, ' '),
+        title: 'PROCTORING NOTICE',
+        sev: log.severity === 'high' ? 'danger' : 'warn',
+        penalty: log.severity === 'high' ? 5 : 2
+    };
+
+    const drop = (info.penalty !== undefined) ? info.penalty : (log.severity === 'high' ? 5 : 2);
     logAnomaly(log.event, log.severity || 'medium', log.text || info.text, info.sev);
 
-    const drop = info.penalty || (log.severity === 'high' ? 10 : log.severity === 'medium' ? 5 : 1);
     if (drop > 0) {
         trustScore = Math.max(0, trustScore - drop);
         updateTrust();
@@ -664,16 +1059,21 @@ function handleProctoringEvent(log) {
             roomId: String(currentInterview),
             event: log.event,
             severity: log.severity || (info.sev === 'danger' ? 'high' : 'medium'),
-            confidence: log.confidence || 1.0,
+            confidence: log.confidence || 0.9,
             details: log.text || info.text
         });
     }
 
     showBanner(log.text || info.text);
 
-    // If critical / high severity, pop up the full alert dialog box
-    if (info.sev === 'danger' || log.severity === 'high') {
+    // Only show modal dialog for confirmed high-severity violations
+    if (info.sev === 'danger' && drop >= 5) {
         showAlertDialog(info.title, log.text || info.text, drop);
+        // Auto-dismiss dialog after 6 seconds so user is not permanently stuck
+        if (alertDialogTimeout) clearTimeout(alertDialogTimeout);
+        alertDialogTimeout = setTimeout(() => {
+            dismissAlertDialog();
+        }, 6000);
     }
 }
 
@@ -779,26 +1179,64 @@ async function submitAndEnd() {
 // ─── AUTO-SESSION & BOOTSTRAP ────────────────────────────────────────────────
 async function loginCandidateDirectly(username, interviewId) {
     try {
-        const res = await fetch(`${API}/api/candidates`);
-        if (!res.ok) throw new Error('Could not fetch candidate details');
-        const list = await res.json();
-        const cand = list.find(c => c.username === username);
-        if (!cand) throw new Error(`Candidate "${username}" not found.`);
+        console.log(`[AUTH] Fetching candidate profile for: ${username}`);
+        let cand = null;
 
-        currentUser = cand;
-        currentInterview = interviewId || cand.interview_id || cand.interviewId;
+        const res = await fetch(`${API}/api/candidates`);
+        if (res.ok) {
+            const list = await res.json();
+            cand = list.find(c => (c.username && c.username.toLowerCase() === username.toLowerCase()) || 
+                                 (c.candidate_name && c.candidate_name.toLowerCase() === username.toLowerCase()));
+        }
+
+        let resolvedInterviewId = interviewId || cand?.interview_id || cand?.interviewId;
+
+        // If interview ID not found, check terminal session endpoint
+        if (!resolvedInterviewId) {
+            try {
+                const termRes = await fetch(`${API}/api/auth/terminal-session`);
+                if (termRes.ok) {
+                    const termData = await termRes.json();
+                    if (termData.active && termData.session?.interviewId) {
+                        resolvedInterviewId = termData.session.interviewId;
+                    }
+                }
+            } catch(e) {}
+        }
+
+        currentUser = cand || {
+            username: username,
+            fullname: username,
+            role: 'candidate',
+            interviewId: resolvedInterviewId
+        };
+        currentInterview = resolvedInterviewId;
 
         if (currentInterview) {
             try {
                 const intRes = await fetch(`${API}/api/interviews/${currentInterview}`);
                 if (intRes.ok) {
                     const intData = await intRes.json();
-                    questions = intData.questions || [];
+                    if (intData.questions && intData.questions.length > 0) {
+                        questions = intData.questions;
+                    }
                 }
             } catch {}
         }
 
-        document.getElementById('candidate-name').textContent = cand.fullname || cand.username;
+        // If still no questions loaded, load default question catalog
+        if (!questions || questions.length === 0) {
+            try {
+                const qRes = await fetch(`${API}/api/questions`);
+                if (qRes.ok) {
+                    const allQs = await qRes.json();
+                    questions = allQs.slice(0, 5);
+                }
+            } catch(e) {}
+        }
+
+        document.getElementById('candidate-name').textContent = currentUser.fullname || currentUser.username;
+        console.log(`[AUTH] Successfully auto-authenticated: ${username} (Interview: ${currentInterview})`);
         showScreen('screen-syscheck');
         runSystemChecks();
     } catch (e) {
@@ -830,11 +1268,23 @@ async function bootTerminal() {
 
     // Check backend active session cache
     try {
-        const res = await fetch(`${API}/api/candidate/active-session`);
+        const res = await fetch(`${API}/api/auth/terminal-session`);
         if (res.ok) {
             const data = await res.json();
             if (data.active && data.session?.username) {
                 console.log(`[BOOT] Auto-authenticating from backend active session: "${data.session.username}"`);
+                await loginCandidateDirectly(data.session.username, data.session.interviewId);
+                return;
+            }
+        }
+    } catch {}
+
+    try {
+        const res = await fetch(`${API}/api/candidate/active-session`);
+        if (res.ok) {
+            const data = await res.json();
+            if (data.active && data.session?.username) {
+                console.log(`[BOOT] Auto-authenticating from legacy candidate session: "${data.session.username}"`);
                 await loginCandidateDirectly(data.session.username, data.session.interviewId);
                 return;
             }

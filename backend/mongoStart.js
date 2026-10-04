@@ -4,9 +4,9 @@
  * Priority:
  *   1. Use MONGO_URI from .env if set (supports MongoDB Atlas)
  *   2. Try connecting to local MongoDB (localhost:27017)
- *   3. Fall back to mongodb-memory-server (data lost on restart — OK for dev/demo)
+ *   3. Fall back to mongodb-memory-server only when explicitly enabled for local development
  *
- * This module NEVER crashes the server. It always resolves with a working URI.
+ * Production must use a persistent MongoDB URI.
  */
 
 const mongoose = require('mongoose');
@@ -43,7 +43,7 @@ async function startMongoDB() {
                 console.warn('   • Make sure your cluster is NOT paused (click "Resume" if needed)');
                 console.warn('   • Verify username/password in the MONGO_URI');
                 console.warn('');
-                console.warn('   ⚡ Continuing with in-memory fallback. Data will NOT persist across restarts.');
+                console.warn('   ⚠️  In-memory fallback is disabled unless ALLOW_IN_MEMORY_DB=true.');
             }
             // Always fall through — never crash the app
         }
@@ -62,7 +62,11 @@ async function startMongoDB() {
         console.warn('⚠️  Local MongoDB not available. Using in-memory fallback...');
     }
 
-    // ── Option 3: In-memory fallback (always works — development/demo safe) ──
+    if (process.env.NODE_ENV === 'production' && process.env.ALLOW_IN_MEMORY_DB !== 'true') {
+        throw new Error('Persistent MongoDB is required in production. Set MONGO_URI or explicitly enable ALLOW_IN_MEMORY_DB for local development only.');
+    }
+
+    // ── Option 3: Explicit local development fallback ───────────────────────
     try {
         const { MongoMemoryServer } = require('mongodb-memory-server');
         const mongod = await MongoMemoryServer.create({
