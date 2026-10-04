@@ -11,7 +11,7 @@ if (typeof process === 'undefined' || !process.env) {
     window.process = { env: {} };
 }
 
-const API = 'http://localhost:5000';
+const API = window.localStorage.getItem('PROCTOR_BACKEND_URL') || 'https://ai-proctoring-system-8nma.onrender.com';
 let proctorSocket = null;
 let signalingSocket = null;
 let peerConnection = null;
