@@ -1099,16 +1099,24 @@ export default function App() {
             <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6, margin: '0 0 20px' }}>
               Your secure exam terminal is linked. For full kiosk security and environment lockdown, launch via the ProctorAI Desktop App or continue below.
             </p>
-            <button
-              onClick={() => {
-                window.location.href = `proctorai://start-exam?username=${encodeURIComponent(currentUser?.username || '')}&role=candidate`;
-              }}
-              className="btn btn-primary w-full"
-              style={{ marginBottom: 10 }}
-            >
-              Launch ProctorAI Desktop Kiosk
-            </button>
-            <button onClick={handleLogout} className="btn btn-secondary w-full">Sign Out</button>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, width: '100%' }}>
+              <button
+                onClick={() => {
+                  window.location.href = `proctorai://start-exam?username=${encodeURIComponent(currentUser?.username || '')}&role=candidate`;
+                }}
+                className="btn btn-primary w-full"
+                style={{ width: '100%' }}
+              >
+                Launch ProctorAI Desktop Kiosk
+              </button>
+              <button
+                onClick={handleLogout}
+                className="btn btn-secondary w-full"
+                style={{ width: '100%' }}
+              >
+                Sign Out
+              </button>
+            </div>
           </div>
         </div>
       </div>
