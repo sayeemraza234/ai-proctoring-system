@@ -427,42 +427,56 @@ app.post('/api/interviews/:id/end', async (req, res) => {
     }
 });
 
-// Ask a manual question during an active interview
-app.post('/api/interviews/:id/ask-question', async (req, res) => {
+// Ask or assign a question to an interview session
+const handleAssignQuestionToInterview = async (req, res) => {
     try {
-        const { title, description, type, difficulty, topic } = req.body;
-        if (!title?.trim() || !description?.trim()) {
-            return res.status(400).json({ error: 'A question title and description are required.' });
-        }
+        const { questionId, title, description, type, difficulty, topic, starterCode, options, testCases } = req.body;
         if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
             return res.status(400).json({ error: 'Invalid interview id.' });
         }
         const interview = await Interview.findById(req.params.id);
         if (!interview) return res.status(404).json({ error: 'Interview not found' });
 
-        // Create the new question
-        const question = await Question.create({
-            title,
-            description,
-            type: type || 'coding',
-            difficulty: difficulty || 'medium',
-            topic: topic || 'General',
-            starterCode: type === 'coding' ? '// Write your code solution here\n' : '',
-            createdBy: interview.interviewerId
-        });
+        let question = null;
+        if (questionId && mongoose.Types.ObjectId.isValid(questionId)) {
+            question = await Question.findById(questionId);
+        }
 
-        // Add to interview questions list
-        interview.questions.push(question._id);
-        await interview.save();
+        if (!question) {
+            if (!title?.trim() || !description?.trim()) {
+                return res.status(400).json({ error: 'A question title and description are required.' });
+            }
+            question = await Question.create({
+                title,
+                description,
+                type: type || 'coding',
+                difficulty: difficulty || 'medium',
+                topic: topic || 'General',
+                starterCode: starterCode || (type === 'coding' ? '// Write your code solution here\n' : ''),
+                options: options || [],
+                testCases: testCases || [],
+                createdBy: interview.interviewerId
+            });
+        }
 
-        // Notify any connected candidate immediately. The dashboard also emits
-        // this event for backwards compatibility with older clients.
+        // Add to interview questions list if not already present
+        if (!interview.questions.some(q => String(q) === String(question._id))) {
+            interview.questions.push(question._id);
+            await interview.save();
+        }
+
+        // Notify connected candidate immediately over WebSocket proctor namespace
         proctorNamespace.to(String(interview._id)).emit('question_assigned', question);
+        console.log(`[PROCTOR] Question "${question.title}" assigned to interview ${interview._id}`);
+
         res.json({ success: true, question });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
-});
+};
+
+app.post('/api/interviews/:id/ask-question', handleAssignQuestionToInterview);
+app.post('/api/interviews/:id/assign-question', handleAssignQuestionToInterview);
 
 // Update interviewer notes / rating / decision
 app.patch('/api/interviews/:id/notes', async (req, res) => {

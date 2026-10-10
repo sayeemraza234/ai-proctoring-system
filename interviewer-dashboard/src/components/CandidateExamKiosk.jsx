@@ -41,6 +41,7 @@ export default function CandidateExamKiosk({ currentUser, onExit }) {
   const [runOutput, setRunOutput] = useState('');
   const [isRunningCode, setIsRunningCode] = useState(false);
   const [activeAlert, setActiveAlert] = useState(null);
+  const [newQuestionAlert, setNewQuestionAlert] = useState(null);
 
   // Timer
   const [timeRemaining, setTimeRemaining] = useState(90 * 60); // 90 minutes
@@ -369,6 +370,8 @@ export default function CandidateExamKiosk({ currentUser, onExit }) {
         if (prev.some(q => (q._id || q.id) === (newQ._id || newQ.id))) return prev;
         return [...prev, newQ];
       });
+      setNewQuestionAlert(newQ.title || 'New Question Assigned');
+      setTimeout(() => setNewQuestionAlert(null), 6000);
     });
 
     pSocket.on('score_update', (data) => {
@@ -382,13 +385,23 @@ export default function CandidateExamKiosk({ currentUser, onExit }) {
       setIsSubmitted(true);
     });
 
-    // Fetch initial questions if empty
-    if (questions.length === 0) {
-      fetch(`${BACKEND}/api/questions`)
+    // Fetch assigned questions for this specific interview session
+    if (interviewId) {
+      fetch(`${BACKEND}/api/interviews/${interviewId}`)
         .then(r => r.json())
         .then(data => {
-          if (Array.isArray(data) && data.length > 0) {
-            setQuestions(data.slice(0, 5));
+          if (data && Array.isArray(data.questions) && data.questions.length > 0) {
+            setQuestions(data.questions);
+          } else if (questions.length === 0) {
+            // Fallback to initial question bank items if none explicitly assigned yet
+            fetch(`${BACKEND}/api/questions`)
+              .then(r => r.json())
+              .then(qList => {
+                if (Array.isArray(qList) && qList.length > 0) {
+                  setQuestions(qList.slice(0, 5));
+                }
+              })
+              .catch(() => {});
           }
         })
         .catch(() => {});
@@ -680,6 +693,28 @@ export default function CandidateExamKiosk({ currentUser, onExit }) {
             }}
           >
             Return to Fullscreen Now
+          </button>
+        </div>
+      )}
+
+      {/* ── NEW QUESTION ASSIGNED BANNER ─────────────────────────────────── */}
+      {newQuestionAlert && (
+        <div style={{
+          background: 'rgba(16, 185, 129, 0.95)', color: '#ffffff', padding: '10px 20px',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          fontSize: 13, borderBottom: '1px solid #059669', zIndex: 85
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <CheckCircle size={18} />
+            <span>
+              <strong>NEW QUESTION ASSIGNED:</strong> &ldquo;{newQuestionAlert}&rdquo; has been added to your assessment.
+            </span>
+          </div>
+          <button
+            onClick={() => setNewQuestionAlert(null)}
+            style={{ background: 'none', border: 'none', color: '#ffffff', cursor: 'pointer', fontSize: 16 }}
+          >
+            ×
           </button>
         </div>
       )}

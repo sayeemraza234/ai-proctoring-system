@@ -362,6 +362,11 @@ export default function App() {
   const [editingQuestion, setEditingQuestion] = useState(null);
   const [qBankView, setQBankView] = useState('list'); // list | form
 
+  // Send Question to Candidate Modal State
+  const [sendModalQuestion, setSendModalQuestion] = useState(null);
+  const [targetCandidateId, setTargetCandidateId] = useState('');
+  const [isAssigningToCandidate, setIsAssigningToCandidate] = useState(false);
+
   const proctorSocketRef = useRef(null);
   const chatSocketRef = useRef(null);
   const notesTimerRef = useRef(null);
@@ -865,6 +870,65 @@ export default function App() {
     }
   };
 
+  // ── Open Send Question to Candidate Modal ──────────────────────────────────
+  const handleOpenSendModal = (question) => {
+    setSendModalQuestion(question);
+    const defaultCandidate = selectedInterview?.id ||
+      allCandidates.find(c => c.status === 'in_progress' || c.status === 'active')?.interview_id ||
+      allCandidates[0]?.interview_id || '';
+    setTargetCandidateId(defaultCandidate);
+  };
+
+  // ── Confirm Sending Question to Candidate ──────────────────────────────────
+  const handleConfirmSendQuestion = async () => {
+    if (!targetCandidateId) {
+      addToast('Please select a target candidate.', 'warning');
+      return;
+    }
+    if (!sendModalQuestion) return;
+
+    setIsAssigningToCandidate(true);
+    try {
+      const targetCand = allCandidates.find(c => c.interview_id === targetCandidateId);
+      const candidateName = targetCand?.fullname || targetCand?.candidate_name || 'Candidate';
+
+      const res = await fetch(`${BACKEND}/api/interviews/${targetCandidateId}/assign-question`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          questionId: sendModalQuestion._id || sendModalQuestion.id,
+          title: sendModalQuestion.title,
+          description: sendModalQuestion.description,
+          type: sendModalQuestion.type,
+          difficulty: sendModalQuestion.difficulty,
+          topic: sendModalQuestion.topic,
+          starterCode: sendModalQuestion.starterCode,
+          options: sendModalQuestion.options,
+          testCases: sendModalQuestion.testCases
+        })
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        // Emit live socket assignment
+        if (proctorSocketRef.current) {
+          proctorSocketRef.current.emit('assign_question', {
+            roomId: targetCandidateId,
+            question: data.question || sendModalQuestion
+          });
+        }
+        addToast(`Question "${sendModalQuestion.title}" successfully sent to ${candidateName}!`, 'success');
+        setSendModalQuestion(null);
+      } else {
+        addToast(data.error || 'Failed to send question to candidate', 'error');
+      }
+    } catch {
+      addToast('Network error while sending question.', 'error');
+    } finally {
+      setIsAssigningToCandidate(false);
+    }
+  };
+
   // ── Run Candidate Code in Interviewer Dashboard ───────────────────────────
   const runCode = async () => {
     if (!candidateLiveCode.trim()) return;
@@ -1296,6 +1360,122 @@ export default function App() {
           onConfirm={handleTerminateInterview}
           isSubmitting={isTerminating}
         />
+      )}
+
+      {/* Send Question to Candidate Modal */}
+      {sendModalQuestion && (
+        <div className="modal-overlay" onClick={() => !isAssigningToCandidate && setSendModalQuestion(null)}>
+          <div
+            className="modal-panel"
+            onClick={e => e.stopPropagation()}
+            style={{ maxWidth: 520, width: '92%', borderRadius: 12, border: '1px solid var(--border-medium)', background: 'var(--bg-surface)' }}
+          >
+            {/* Modal Header */}
+            <div style={{ padding: '18px 24px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ width: 32, height: 32, borderRadius: 8, background: 'var(--primary-light)', color: 'var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <Send size={16} />
+                </div>
+                <div>
+                  <h3 style={{ fontSize: 15, fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>Send Question to Candidate</h3>
+                  <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>Assign this problem to a candidate's live assessment terminal.</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setSendModalQuestion(null)}
+                className="btn btn-ghost btn-icon btn-sm"
+                disabled={isAssigningToCandidate}
+              >
+                <X size={15} />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {/* Question Preview Card */}
+              <div style={{ padding: '14px 16px', borderRadius: 8, background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                  <span className={`diff-${sendModalQuestion.difficulty}`} style={{ fontSize: 10, textTransform: 'uppercase', fontWeight: 700 }}>
+                    {sendModalQuestion.difficulty}
+                  </span>
+                  <span className="badge badge-scheduled" style={{ fontSize: 10 }}>
+                    {sendModalQuestion.type}
+                  </span>
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>• {sendModalQuestion.topic || 'General'}</span>
+                </div>
+                <h4 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', margin: '0 0 6px 0' }}>
+                  {sendModalQuestion.title}
+                </h4>
+                <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: 0, maxHeight: 60, overflow: 'hidden', textOverflow: 'ellipsis', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' }}>
+                  {sendModalQuestion.description}
+                </p>
+              </div>
+
+              {/* Target Candidate Selection */}
+              <div>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>
+                  Select Target Candidate
+                </label>
+                {allCandidates.length === 0 ? (
+                  <div style={{ padding: 12, borderRadius: 8, background: 'var(--warning-bg)', border: '1px solid var(--warning-border)', color: 'var(--warning)', fontSize: 12 }}>
+                    ⚠️ No candidate records found. Please create a candidate first in the Candidates section.
+                  </div>
+                ) : (
+                  <select
+                    value={targetCandidateId}
+                    onChange={e => setTargetCandidateId(e.target.value)}
+                    className="form-input"
+                    style={{ width: '100%', fontSize: 13, background: 'var(--bg-elevated)' }}
+                    disabled={isAssigningToCandidate}
+                  >
+                    {allCandidates.map(c => {
+                      const isLive = c.status === 'in_progress' || c.status === 'active';
+                      return (
+                        <option key={c.interview_id} value={c.interview_id}>
+                          {c.fullname || c.candidate_name} ({c.role || 'Software Engineer'}) {isLive ? '🟢 [LIVE SESSION]' : `[${c.status}]`}
+                        </option>
+                      );
+                    })}
+                  </select>
+                )}
+                <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '6px 0 0 0' }}>
+                  The candidate will receive this question immediately in their Kiosk examination interface.
+                </p>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div style={{ padding: '14px 24px', borderTop: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'flex-end', gap: 10, background: 'var(--bg-subtle)' }}>
+              <button
+                type="button"
+                onClick={() => setSendModalQuestion(null)}
+                className="btn btn-secondary"
+                disabled={isAssigningToCandidate}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmSendQuestion}
+                className="btn btn-primary"
+                disabled={isAssigningToCandidate || allCandidates.length === 0 || !targetCandidateId}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              >
+                {isAssigningToCandidate ? (
+                  <>
+                    <span className="spinner" style={{ width: 13, height: 13 }} />
+                    <span>Sending...</span>
+                  </>
+                ) : (
+                  <>
+                    <Send size={13} />
+                    <span>Send Question</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* AI Evaluation Modal */}
@@ -2580,7 +2760,7 @@ export default function App() {
                         <th>Difficulty</th>
                         <th>Topic</th>
                         <th>Tags</th>
-                        <th>Actions</th>
+                        <th style={{ textAlign: 'right', minWidth: 160 }}>Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -2601,18 +2781,25 @@ export default function App() {
                             </div>
                           </td>
                           <td>
-                            <div style={{ display: 'flex', gap: 6 }}>
-                              {selectedInterview && (
-                                <button
-                                  onClick={() => handleSendLiveQuestion(q)}
-                                  className="btn btn-primary btn-sm btn-icon"
-                                  title="Send to Active Candidate"
-                                >
-                                  <Send size={11} />
-                                </button>
-                              )}
-                              <button onClick={() => handleDeleteQuestion(q)} className="btn btn-ghost btn-sm btn-icon" style={{ color: 'var(--danger)' }} title="Delete">
-                                <Trash2 size={11} />
+                            <div style={{ display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'flex-end' }}>
+                              <button
+                                type="button"
+                                onClick={() => handleOpenSendModal(q)}
+                                className="btn btn-primary btn-sm"
+                                style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 10px', fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap' }}
+                                title="Send Question to Candidate"
+                              >
+                                <Send size={11} />
+                                <span>Send to Candidate</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteQuestion(q)}
+                                className="btn btn-ghost btn-sm btn-icon"
+                                style={{ color: 'var(--danger)' }}
+                                title="Delete Question"
+                              >
+                                <Trash2 size={12} />
                               </button>
                             </div>
                           </td>
