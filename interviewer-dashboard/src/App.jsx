@@ -773,8 +773,8 @@ export default function App() {
             body: JSON.stringify(q)
           });
         }
-        fetchQuestions();
-        addToast(`Generated & added ${data.questions.length} technical questions!`, 'success');
+        const sourceNotice = data?.source === 'gemini' ? ' (Gemini 2.5 Flash)' : ' (ProctorAI Question Engine)';
+        addToast(`Generated & added ${data.questions.length} technical questions!${sourceNotice}`, 'success');
       } else {
         addToast(
           data?.message || 'Gemini API key not configured. Add GEMINI_API_KEY to Render or Vercel Environment Variables.',

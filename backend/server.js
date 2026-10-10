@@ -12,6 +12,7 @@ const cors = require('cors');
 const mongoose = require('mongoose');
 const { User, Question, Interview, Log, Chat } = require('./models');
 const { startMongoDB } = require('./mongoStart');
+const { generateSmartQuestions } = require('./questionGenerator');
 
 const app = express();
 const server = http.createServer(app);
@@ -878,22 +879,16 @@ Return a JSON object with this exact structure:
     }
 });
 
-// AI Question Generator
+// AI Question Generator (Hybrid: Gemini LLM if key is present, Smart Synthesis Engine fallback)
 app.post('/api/ai/generate-questions', async (req, res) => {
-    try {
-        const { jobRole, jobLevel, topics, count } = req.body;
-        const GEMINI_KEY = getGeminiKey();
+    const { jobRole = 'Software Engineer', jobLevel = 'senior', topics = ['Algorithms', 'System Design'], count = 3 } = req.body || {};
+    const GEMINI_KEY = getGeminiKey();
 
-        if (!GEMINI_KEY) {
-            return res.json({
-                success: false,
-                message: 'Gemini API key not configured. Please add GEMINI_API_KEY to your backend environment variables (Render Dashboard or backend/.env).',
-                questions: []
-            });
-        }
-
-        const prompt = `Generate ${count || 3} technical interview questions for a ${jobLevel || 'mid'}-level ${jobRole || 'Software Engineer'} position.
-Focus topics: ${topics?.join(', ') || 'data structures, algorithms, system design'}.
+    // 1. If Gemini key is configured, attempt live Google Gemini generation
+    if (GEMINI_KEY) {
+        try {
+            const prompt = `Generate ${count} technical interview questions for a ${jobLevel}-level ${jobRole} position.
+Focus topics: ${Array.isArray(topics) ? topics.join(', ') : topics}.
 
 Return a JSON array where each item has:
 {
@@ -906,29 +901,44 @@ Return a JSON array where each item has:
   "tags": ["tag1", "tag2"]
 }`;
 
-        const geminiRes = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`,
-            {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    contents: [{ parts: [{ text: prompt }] }],
-                    generationConfig: { responseMimeType: 'application/json' }
-                })
-            }
-        );
+            const geminiRes = await fetch(
+                `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: [{ parts: [{ text: prompt }] }],
+                        generationConfig: { responseMimeType: 'application/json' }
+                    })
+                }
+            );
 
-        const geminiData = await geminiRes.json();
-        if (!geminiRes.ok) {
-            throw new Error(geminiData.error?.message || 'Gemini question generation request failed');
+            const geminiData = await geminiRes.json();
+            if (geminiRes.ok) {
+                const text = geminiData.candidates?.[0]?.content?.parts?.[0]?.text;
+                if (text) {
+                    const questions = JSON.parse(text);
+                    return res.json({ success: true, source: 'gemini', questions });
+                }
+            } else {
+                console.warn('[AI-GENERATE] Gemini API returned error, activating Smart Question Engine fallback:', geminiData.error?.message);
+            }
+        } catch (err) {
+            console.warn('[AI-GENERATE] Gemini request failed, activating Smart Question Engine fallback:', sanitizeError(err.message, GEMINI_KEY));
         }
-        const text = geminiData.candidates?.[0]?.content?.parts?.[0]?.text;
-        const questions = JSON.parse(text);
-        res.json({ success: true, questions });
-    } catch (err) {
-        const sanitized = sanitizeError(err.message, getGeminiKey());
-        console.error('[AI-GENERATE] Error:', sanitized);
-        res.status(500).json({ error: sanitized });
+    }
+
+    // 2. Built-in Smart Synthesis Generator (Zero setup / Instant fallback)
+    try {
+        const questions = generateSmartQuestions({ jobRole, jobLevel, topics, count });
+        return res.json({
+            success: true,
+            source: 'smart_synthesis_engine',
+            questions
+        });
+    } catch (genErr) {
+        console.error('[AI-GENERATE] Question generation error:', genErr);
+        res.status(500).json({ success: false, error: 'Failed to generate questions' });
     }
 });
 
