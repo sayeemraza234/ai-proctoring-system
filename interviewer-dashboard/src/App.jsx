@@ -8,7 +8,7 @@ import {
   Send, Bell, HelpCircle, Brain, Save, Mic,
   ArrowLeft, PlusCircle, AlertCircle, PhoneOff, AlertOctagon,
   Sparkles, Layout, Split, Moon, Sun, Palette,
-  PanelLeftClose, PanelLeftOpen, Radio, Copy, Check
+  PanelLeftClose, PanelLeftOpen, Radio, Copy, Check, Maximize2
 } from 'lucide-react';
 import LiveStream from './components/LiveStream';
 import AlertsPanel from './components/AlertsPanel';
