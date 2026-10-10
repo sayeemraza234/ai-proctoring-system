@@ -29,11 +29,24 @@ function configuredSecret(name) {
         !value.trim() ||
         value.includes('<') ||
         value === 'your-api-key-here' ||
-        value === 'your_gemini_api_key_here'
+        value === 'your_gemini_api_key_here' ||
+        value === 'your_api_key_here' ||
+        value === 'your_judge0_api_key_here'
     ) {
         return null;
     }
     return value.trim();
+}
+
+/**
+ * Retrieves the Google Gemini API key checking standard environment variable aliases.
+ */
+function getGeminiKey() {
+    return (
+        configuredSecret('GEMINI_API_KEY') ||
+        configuredSecret('GOOGLE_GEMINI_API_KEY') ||
+        configuredSecret('GOOGLE_API_KEY')
+    );
 }
 
 /**
@@ -690,7 +703,7 @@ app.post('/api/run-code', async (req, res) => {
         const languageId = langMap[language] || 63;
 
         if (!JUDGE0_KEY) {
-            const GEMINI_KEY = configuredSecret('GEMINI_API_KEY');
+            const GEMINI_KEY = getGeminiKey();
             if (GEMINI_KEY) {
                 try {
                     const prompt = `You are a virtual code compiler, interpreter, and execution sandbox.
@@ -781,12 +794,12 @@ ${code}`;
 app.post('/api/ai/evaluate', async (req, res) => {
     try {
         const { interviewId, submissions, questions } = req.body;
-        const GEMINI_KEY = configuredSecret('GEMINI_API_KEY');
+        const GEMINI_KEY = getGeminiKey();
 
         if (!GEMINI_KEY) {
             return res.json({
                 success: false,
-                message: 'Gemini API key not configured. Add GEMINI_API_KEY to backend/.env',
+                message: 'Gemini API key not configured. Please add GEMINI_API_KEY to your backend environment variables (Render Dashboard or backend/.env).',
                 evaluation: null
             });
         }
@@ -869,12 +882,12 @@ Return a JSON object with this exact structure:
 app.post('/api/ai/generate-questions', async (req, res) => {
     try {
         const { jobRole, jobLevel, topics, count } = req.body;
-        const GEMINI_KEY = configuredSecret('GEMINI_API_KEY');
+        const GEMINI_KEY = getGeminiKey();
 
         if (!GEMINI_KEY) {
             return res.json({
                 success: false,
-                message: 'Gemini API key not configured.',
+                message: 'Gemini API key not configured. Please add GEMINI_API_KEY to your backend environment variables (Render Dashboard or backend/.env).',
                 questions: []
             });
         }
@@ -913,7 +926,7 @@ Return a JSON array where each item has:
         const questions = JSON.parse(text);
         res.json({ success: true, questions });
     } catch (err) {
-        const sanitized = sanitizeError(err.message, configuredSecret('GEMINI_API_KEY'));
+        const sanitized = sanitizeError(err.message, getGeminiKey());
         console.error('[AI-GENERATE] Error:', sanitized);
         res.status(500).json({ error: sanitized });
     }
@@ -923,10 +936,14 @@ Return a JSON array where each item has:
 app.post('/api/ai/suggest-followup', async (req, res) => {
     try {
         const { question, candidateAnswer, jobRole } = req.body;
-        const GEMINI_KEY = configuredSecret('GEMINI_API_KEY');
+        const GEMINI_KEY = getGeminiKey();
 
         if (!GEMINI_KEY) {
-            return res.json({ success: false, suggestions: [] });
+            return res.json({
+                success: false,
+                message: 'Gemini API key not configured. Please add GEMINI_API_KEY to your backend environment variables (Render Dashboard or backend/.env).',
+                suggestions: []
+            });
         }
 
         const prompt = `You are an expert technical interviewer. The candidate is applying for ${jobRole || 'Software Engineer'}.
@@ -956,7 +973,7 @@ Based on their answer, suggest 3 sharp follow-up questions to probe deeper. Retu
         const suggestions = JSON.parse(text);
         res.json({ success: true, suggestions });
     } catch (err) {
-        const sanitized = sanitizeError(err.message, configuredSecret('GEMINI_API_KEY'));
+        const sanitized = sanitizeError(err.message, getGeminiKey());
         console.error('[AI-FOLLOWUP] Error:', sanitized);
         res.status(500).json({ error: sanitized });
     }
@@ -966,7 +983,7 @@ Based on their answer, suggest 3 sharp follow-up questions to probe deeper. Retu
 
 // Status route: returns masked key and configuration state for admin/interviewer dashboard
 const handleAiStatus = (req, res) => {
-    const key = configuredSecret('GEMINI_API_KEY');
+    const key = getGeminiKey();
     res.json({
         configured: Boolean(key),
         provider: 'Google Gemini',
@@ -979,11 +996,11 @@ app.get('/api/gemini/status', handleAiStatus);
 
 // Server-side proxy: executes arbitrary Gemini requests securely without leaking client keys
 const handleGeminiProxy = async (req, res) => {
-    const GEMINI_KEY = configuredSecret('GEMINI_API_KEY');
+    const GEMINI_KEY = getGeminiKey();
     if (!GEMINI_KEY) {
         return res.status(503).json({
             success: false,
-            error: 'Gemini AI API key not configured on server. Add GEMINI_API_KEY to backend/.env'
+            error: 'Gemini AI API key not configured on server. Add GEMINI_API_KEY to backend/.env or Render environment variables'
         });
     }
 
@@ -1368,12 +1385,12 @@ app.post('/api/proctor/analyze-frame', async (req, res) => {
             return res.status(400).json({ error: 'Image data is required' });
         }
 
-        const GEMINI_KEY = configuredSecret('GEMINI_API_KEY');
+        const GEMINI_KEY = getGeminiKey();
         if (!GEMINI_KEY) {
             return res.json({
                 hasGemini: false,
                 analyzed: false,
-                message: 'Gemini API key not configured in .env'
+                message: 'Gemini API key not configured. Please add GEMINI_API_KEY to your backend environment variables (Render Dashboard or backend/.env).'
             });
         }
 
@@ -1644,7 +1661,7 @@ Respond with JSON:
 
         res.json({ success: true, hasGemini: true, analyzed: true, result });
     } catch (err) {
-        const sanitized = sanitizeError(err.message, configuredSecret('GEMINI_API_KEY'));
+        const sanitized = sanitizeError(err.message, getGeminiKey());
         console.error('[PROCTOR-FRAME] Error:', sanitized);
         res.status(500).json({ error: sanitized });
     }
@@ -1652,7 +1669,7 @@ Respond with JSON:
 
 // ─── Start Server ─────────────────────────────────────────────────────────────
 server.listen(PORT, () => {
-    const geminiKey = configuredSecret('GEMINI_API_KEY');
+    const geminiKey = getGeminiKey();
     console.log(`🚀 ProctorAI Backend v2.0 running on port ${PORT}`);
     console.log(`   API: http://localhost:${PORT}`);
     console.log(`   Gemini AI: ${geminiKey ? `Active (Masked: ${maskSecret(geminiKey)})` : 'Not configured (Mock / heuristic fallback active)'}`);

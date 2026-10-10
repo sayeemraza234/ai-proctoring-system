@@ -723,30 +723,66 @@ export default function App() {
   const handleAiGenerateQuestions = async () => {
     setIsAiGeneratingQuestions(true);
     try {
-      const res = await fetch(`${BACKEND}/api/ai/generate-questions`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          jobRole: 'Full Stack Software Engineer',
-          jobLevel: 'senior',
-          topics: ['Algorithms', 'System Architecture', 'Database Concurrency'],
-          count: 3
-        })
-      });
-      const data = await res.json();
-      if (data.success && Array.isArray(data.questions)) {
+      const payload = {
+        jobRole: 'Full Stack Software Engineer',
+        jobLevel: 'senior',
+        topics: ['Algorithms', 'System Architecture', 'Database Concurrency'],
+        count: 3
+      };
+
+      let data = null;
+
+      // 1. First attempt backend endpoint
+      try {
+        const res = await fetch(`${BACKEND}/api/ai/generate-questions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (res.ok) {
+          data = await res.json();
+        }
+      } catch (backendErr) {
+        console.warn('Backend question generator call failed:', backendErr);
+      }
+
+      // 2. If backend missing key or unavailable, fallback to Vercel serverless route
+      if (!data?.success && window.location.hostname.includes('vercel.app')) {
+        try {
+          const vercelRes = await fetch('/api/ai/generate-questions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          if (vercelRes.ok) {
+            const vercelData = await vercelRes.json();
+            if (vercelData.success && Array.isArray(vercelData.questions)) {
+              data = vercelData;
+            }
+          }
+        } catch (vercelErr) {
+          console.warn('Vercel serverless question generator call failed:', vercelErr);
+        }
+      }
+
+      if (data?.success && Array.isArray(data.questions)) {
         for (const q of data.questions) {
           await fetch(`${BACKEND}/api/questions`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(q)
           });
         }
         fetchQuestions();
         addToast(`Generated & added ${data.questions.length} technical questions!`, 'success');
       } else {
-        addToast(data.message || 'AI generation failed', 'warning');
+        addToast(
+          data?.message || 'Gemini API key not configured. Add GEMINI_API_KEY to Render or Vercel Environment Variables.',
+          'warning'
+        );
       }
     } catch {
-      addToast('Error generating questions', 'error');
+      addToast('Error generating questions. Please verify GEMINI_API_KEY.', 'error');
     } finally {
       setIsAiGeneratingQuestions(false);
     }
