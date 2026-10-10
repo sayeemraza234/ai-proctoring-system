@@ -1,7 +1,11 @@
+const path = require('path');
+// Load environment variables with fallback from local directory and parent root
+require('dotenv').config({ path: path.resolve(__dirname, '.env') });
+require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
 require('dotenv').config();
+
 const express = require('express');
 const http = require('http');
-const path = require('path');
 const { spawn } = require('child_process');
 const { Server } = require('socket.io');
 const cors = require('cors');
@@ -17,12 +21,42 @@ app.use(express.json({ limit: '10mb' }));
 
 const PORT = process.env.PORT || 5000;
 
+// ─── Secret Management & Masking Utilities ────────────────────────────────────
 function configuredSecret(name) {
     const value = process.env[name];
-    if (!value || !value.trim() || value.includes('<') || value === 'your-api-key-here') {
+    if (
+        !value ||
+        !value.trim() ||
+        value.includes('<') ||
+        value === 'your-api-key-here' ||
+        value === 'your_gemini_api_key_here'
+    ) {
         return null;
     }
     return value.trim();
+}
+
+/**
+ * Returns a masked representation of sensitive keys for logs or safe UI reporting.
+ * e.g., "AIzaSy...ABCD" (only prefix and last 4 characters visible).
+ */
+function maskSecret(key) {
+    if (!key || typeof key !== 'string') return null;
+    const clean = key.trim();
+    if (clean.length <= 8) return '••••••••';
+    return `${clean.substring(0, 6)}...${clean.slice(-4)}`;
+}
+
+/**
+ * Sanitizes errors and logs so raw secrets are never leaked in stack traces or responses.
+ */
+function sanitizeError(msg, secret) {
+    if (!msg || typeof msg !== 'string') return 'An error occurred';
+    if (secret && typeof secret === 'string' && secret.length > 4) {
+        const escaped = secret.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        return msg.replace(new RegExp(escaped, 'g'), '[REDACTED_API_KEY]');
+    }
+    return msg;
 }
 
 // ─── MongoDB Connection ───────────────────────────────────────────────────────
@@ -704,7 +738,7 @@ ${code}`;
                         return res.json(parsed);
                     }
                 } catch (geminiErr) {
-                    console.error('Gemini code execution simulation failed:', geminiErr);
+                    console.error('Gemini code execution simulation failed:', sanitizeError(geminiErr?.message || geminiErr, GEMINI_KEY));
                 }
             }
 
@@ -825,7 +859,9 @@ Return a JSON object with this exact structure:
 
         res.json({ success: true, evaluation });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        const sanitized = sanitizeError(err.message, configuredSecret('GEMINI_API_KEY'));
+        console.error('[AI-EVALUATE] Error:', sanitized);
+        res.status(500).json({ error: sanitized });
     }
 });
 
@@ -877,7 +913,9 @@ Return a JSON array where each item has:
         const questions = JSON.parse(text);
         res.json({ success: true, questions });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        const sanitized = sanitizeError(err.message, configuredSecret('GEMINI_API_KEY'));
+        console.error('[AI-GENERATE] Error:', sanitized);
+        res.status(500).json({ error: sanitized });
     }
 });
 
@@ -918,9 +956,101 @@ Based on their answer, suggest 3 sharp follow-up questions to probe deeper. Retu
         const suggestions = JSON.parse(text);
         res.json({ success: true, suggestions });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        const sanitized = sanitizeError(err.message, configuredSecret('GEMINI_API_KEY'));
+        console.error('[AI-FOLLOWUP] Error:', sanitized);
+        res.status(500).json({ error: sanitized });
     }
 });
+
+// ── Gemini Secure Server-Side Proxy & Status Routes ──────────────────────────
+
+// Status route: returns masked key and configuration state for admin/interviewer dashboard
+const handleAiStatus = (req, res) => {
+    const key = configuredSecret('GEMINI_API_KEY');
+    res.json({
+        configured: Boolean(key),
+        provider: 'Google Gemini',
+        model: 'gemini-2.5-flash',
+        maskedKey: maskSecret(key)
+    });
+};
+app.get('/api/ai/status', handleAiStatus);
+app.get('/api/gemini/status', handleAiStatus);
+
+// Server-side proxy: executes arbitrary Gemini requests securely without leaking client keys
+const handleGeminiProxy = async (req, res) => {
+    const GEMINI_KEY = configuredSecret('GEMINI_API_KEY');
+    if (!GEMINI_KEY) {
+        return res.status(503).json({
+            success: false,
+            error: 'Gemini AI API key not configured on server. Add GEMINI_API_KEY to backend/.env'
+        });
+    }
+
+    try {
+        const {
+            model = 'gemini-2.5-flash',
+            contents,
+            prompt,
+            generationConfig,
+            systemInstruction
+        } = req.body || {};
+
+        let payloadContents = contents;
+        if (!payloadContents && prompt) {
+            payloadContents = [{ parts: [{ text: String(prompt) }] }];
+        }
+
+        if (!payloadContents || !Array.isArray(payloadContents)) {
+            return res.status(400).json({
+                success: false,
+                error: 'Invalid request body. Expected "prompt" string or "contents" array.'
+            });
+        }
+
+        const safeModel = String(model).replace(/[^a-zA-Z0-9._-]/g, '') || 'gemini-2.5-flash';
+        const requestPayload = { contents: payloadContents };
+
+        if (generationConfig && typeof generationConfig === 'object') {
+            requestPayload.generationConfig = generationConfig;
+        }
+        if (systemInstruction) {
+            requestPayload.systemInstruction = typeof systemInstruction === 'string'
+                ? { parts: [{ text: systemInstruction }] }
+                : systemInstruction;
+        }
+
+        const geminiRes = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${safeModel}:generateContent?key=${GEMINI_KEY}`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(requestPayload)
+            }
+        );
+
+        const geminiData = await geminiRes.json();
+        if (!geminiRes.ok) {
+            const rawMsg = geminiData.error?.message || 'Gemini proxy request failed';
+            throw new Error(sanitizeError(rawMsg, GEMINI_KEY));
+        }
+
+        const candidateText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        res.json({
+            success: true,
+            model: safeModel,
+            text: candidateText,
+            raw: geminiData
+        });
+    } catch (err) {
+        const sanitized = sanitizeError(err.message, GEMINI_KEY);
+        console.error('[AI-PROXY] Error:', sanitized);
+        res.status(500).json({ success: false, error: sanitized });
+    }
+};
+
+app.post('/api/ai/proxy', handleGeminiProxy);
+app.post('/api/gemini', handleGeminiProxy);
 
 // ─── WebSocket Namespaces ─────────────────────────────────────────────────────
 
@@ -1514,13 +1644,16 @@ Respond with JSON:
 
         res.json({ success: true, hasGemini: true, analyzed: true, result });
     } catch (err) {
-        console.error('[PROCTOR-FRAME] Error:', err.message);
-        res.status(500).json({ error: err.message });
+        const sanitized = sanitizeError(err.message, configuredSecret('GEMINI_API_KEY'));
+        console.error('[PROCTOR-FRAME] Error:', sanitized);
+        res.status(500).json({ error: sanitized });
     }
 });
 
 // ─── Start Server ─────────────────────────────────────────────────────────────
 server.listen(PORT, () => {
+    const geminiKey = configuredSecret('GEMINI_API_KEY');
     console.log(`🚀 ProctorAI Backend v2.0 running on port ${PORT}`);
     console.log(`   API: http://localhost:${PORT}`);
+    console.log(`   Gemini AI: ${geminiKey ? `Active (Masked: ${maskSecret(geminiKey)})` : 'Not configured (Mock / heuristic fallback active)'}`);
 });

@@ -328,6 +328,7 @@ export default function App() {
   const [aiFollowups, setAiFollowups] = useState([]);
   const [isLoadingFollowups, setIsLoadingFollowups] = useState(false);
   const [isAiGeneratingQuestions, setIsAiGeneratingQuestions] = useState(false);
+  const [aiStatus, setAiStatus] = useState(null);
 
   // Live tabs in workspace
   const [activeLiveTab, setActiveLiveTab] = useState('notes'); // 'notes' | 'code' | 'question' | 'aiCopilot' | 'profile'
@@ -391,6 +392,16 @@ export default function App() {
     } catch {}
   }, []);
 
+  const fetchAiStatus = useCallback(async () => {
+    try {
+      const res = await fetch(`${BACKEND}/api/ai/status`);
+      if (res.ok) {
+        const data = await res.json();
+        setAiStatus(data);
+      }
+    } catch {}
+  }, []);
+
   // Handle URL params for direct interviewer role or candidate kiosk route
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -431,10 +442,11 @@ export default function App() {
       fetchCandidates();
       fetchStats();
       fetchQuestions();
-      const interval = setInterval(() => { fetchCandidates(); fetchStats(); }, 8000);
+      fetchAiStatus();
+      const interval = setInterval(() => { fetchCandidates(); fetchStats(); fetchAiStatus(); }, 12000);
       return () => clearInterval(interval);
     }
-  }, [view, fetchCandidates, fetchStats, fetchQuestions]);
+  }, [view, fetchCandidates, fetchStats, fetchQuestions, fetchAiStatus]);
 
   useEffect(() => {
     if (view === 'interviewer' && activeSection === 'questions') fetchQuestions();
@@ -1451,6 +1463,39 @@ export default function App() {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {/* Gemini AI Status Badge (Secure Server-Side Masking) */}
+            {aiStatus && (
+              <div
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '4px 10px',
+                  borderRadius: 6,
+                  fontSize: 12,
+                  fontFamily: 'JetBrains Mono, monospace',
+                  border: '1px solid var(--border-subtle)',
+                  background: 'var(--bg-subtle)',
+                  color: 'var(--text-secondary)'
+                }}
+                title={aiStatus.configured ? `Gemini AI (${aiStatus.model}) connected` : 'Gemini API Key missing in backend/.env'}
+              >
+                <span
+                  style={{
+                    width: 7,
+                    height: 7,
+                    borderRadius: '50%',
+                    backgroundColor: aiStatus.configured ? '#10b981' : '#f59e0b',
+                    boxShadow: aiStatus.configured ? '0 0 6px rgba(16, 185, 129, 0.4)' : 'none'
+                  }}
+                />
+                <span style={{ fontWeight: 600 }}>Gemini:</span>
+                <span style={{ color: aiStatus.configured ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+                  {aiStatus.configured ? (aiStatus.maskedKey || 'Active') : 'Not Configured'}
+                </span>
+              </div>
+            )}
+
             {/* Strictly Two Theme Options: White and Black */}
             <div className="theme-toggle-segmented" role="radiogroup" aria-label="Color Theme">
               <button
