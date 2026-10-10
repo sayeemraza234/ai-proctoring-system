@@ -8,7 +8,8 @@ import {
   Send, Bell, HelpCircle, Brain, Save, Mic,
   ArrowLeft, PlusCircle, AlertCircle, PhoneOff, AlertOctagon,
   Sparkles, Layout, Split, Moon, Sun, Palette,
-  PanelLeftClose, PanelLeftOpen, Radio, Copy, Check, Maximize2
+  PanelLeftClose, PanelLeftOpen, Radio, Copy, Check, Maximize2,
+  MoreVertical, Settings, Layers, Filter
 } from 'lucide-react';
 import LiveStream from './components/LiveStream';
 import AlertsPanel from './components/AlertsPanel';
@@ -255,8 +256,9 @@ export default function App() {
   const [department, setDepartment] = useState('');
   const [linkedIn, setLinkedIn] = useState('');
 
-  // Sidebar collapsed state
+  // Sidebar collapsed state & profile menu popover
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
 
   // Toast system
   const [toasts, setToasts] = useState([]);
@@ -957,17 +959,34 @@ export default function App() {
       tags: qTags.split(',').map(t => t.trim()).filter(Boolean)
     };
     try {
-      const res = await fetch(`${BACKEND}/api/questions`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+      const isEdit = Boolean(editingQuestion?._id);
+      const url = isEdit ? `${BACKEND}/api/questions/${editingQuestion._id}` : `${BACKEND}/api/questions`;
+      const method = isEdit ? 'PUT' : 'POST';
+      const res = await fetch(url, {
+        method, headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
       });
       if (res.ok) {
-        addToast('Question saved to bank', 'success');
+        addToast(isEdit ? 'Question updated successfully' : 'Question saved to bank', 'success');
         resetQuestionForm();
         setQBankView('list');
         fetchQuestions();
+      } else {
+        addToast('Failed to save question', 'warning');
       }
     } catch { addToast('Error saving question', 'error'); }
+  };
+
+  const handleEditQuestion = (q) => {
+    setEditingQuestion(q);
+    setQTitle(q.title || '');
+    setQDesc(q.description || '');
+    setQType(q.type || 'coding');
+    setQDiff(q.difficulty || 'medium');
+    setQTopic(q.topic || '');
+    setQStarter(q.starterCode || '');
+    setQTags(Array.isArray(q.tags) ? q.tags.join(', ') : (q.tags || ''));
+    setQBankView('form');
   };
 
   const handleDeleteQuestion = async (q) => {
@@ -1569,23 +1588,53 @@ export default function App() {
 
       {/* ── SIDEBAR ───────────────────────────────────────────────────────── */}
       <aside className="sidebar" style={{ width: isSidebarCollapsed ? 64 : 240 }}>
-        {/* Brand */}
+        {/* Brand & Context */}
         <div style={{
-          height: 56,
-          padding: isSidebarCollapsed ? '0' : '0 18px',
+          height: 60,
+          padding: isSidebarCollapsed ? '0' : '0 16px',
           display: 'flex',
           alignItems: 'center',
           justifyContent: isSidebarCollapsed ? 'center' : 'space-between',
-          borderBottom: '1px solid var(--border-subtle)'
+          borderBottom: '1px solid var(--border-subtle)',
+          flexShrink: 0
         }}>
           {!isSidebarCollapsed && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <div style={{ width: 28, height: 28, borderRadius: 6, background: 'var(--primary-light)', border: '1px solid var(--primary-border)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--primary)' }}>
-                <Shield size={16} />
+              <div style={{
+                width: 32,
+                height: 32,
+                borderRadius: 8,
+                background: 'linear-gradient(135deg, #6366f1 0%, #4338ca 100%)',
+                boxShadow: '0 2px 8px rgba(99, 102, 241, 0.35)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#ffffff',
+                flexShrink: 0
+              }}>
+                <Shield size={17} />
               </div>
-              <div>
-                <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--text-primary)', lineHeight: 1.1 }}>ProctorAI</div>
-                <div style={{ fontSize: 10, color: 'var(--text-muted)', letterSpacing: 0.5 }}>Enterprise</div>
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.3px', lineHeight: 1.1 }}>ProctorAI</span>
+                  <span style={{
+                    fontSize: 9,
+                    fontWeight: 700,
+                    padding: '1px 5px',
+                    borderRadius: 4,
+                    background: 'var(--primary-light)',
+                    color: 'var(--primary)',
+                    border: '1px solid var(--primary-border)',
+                    letterSpacing: '0.4px',
+                    lineHeight: 1.3
+                  }}>
+                    WORKSPACE
+                  </span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 2 }}>
+                  <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#10b981', boxShadow: '0 0 6px rgba(16, 185, 129, 0.7)' }} />
+                  <span style={{ fontSize: 10, color: 'var(--text-muted)', letterSpacing: '0.2px' }}>Enterprise Node</span>
+                </div>
               </div>
             </div>
           )}
@@ -1594,30 +1643,27 @@ export default function App() {
             className="btn btn-ghost btn-icon btn-sm"
             title={isSidebarCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar'}
           >
-            {isSidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+            {isSidebarCollapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
           </button>
         </div>
 
         {/* Nav list */}
-        <nav style={{ flex: 1, padding: '12px 8px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <nav style={{ flex: 1, padding: '14px 10px', display: 'flex', flexDirection: 'column', gap: 3 }}>
           {navItems.map(({ id, label, icon: Icon, badge }) => (
             <button
               key={id}
-              onClick={() => setActiveSection(id)}
+              onClick={() => { setActiveSection(id); setIsProfileMenuOpen(false); }}
               className={`nav-item ${activeSection === id ? 'active' : ''}`}
-              style={{ justifyContent: isSidebarCollapsed ? 'center' : 'flex-start', padding: isSidebarCollapsed ? '10px 0' : '9px 12px' }}
+              style={{ justifyContent: isSidebarCollapsed ? 'center' : 'flex-start', padding: isSidebarCollapsed ? '10px 0' : '8px 12px' }}
               title={label}
             >
-              <Icon size={16} />
-              {!isSidebarCollapsed && <span>{label}</span>}
+              <Icon size={16} style={{ color: activeSection === id ? 'var(--primary)' : 'var(--text-secondary)', flexShrink: 0 }} />
+              {!isSidebarCollapsed && <span style={{ flex: 1, whiteSpace: 'nowrap' }}>{label}</span>}
               {!isSidebarCollapsed && badge > 0 && (
-                <span style={{
-                  marginLeft: 'auto', fontSize: 10, fontWeight: 700,
-                  padding: '1px 6px', borderRadius: 9999,
-                  background: id === 'live' ? 'var(--success-bg)' : 'var(--bg-elevated)',
-                  color: id === 'live' ? 'var(--success)' : 'var(--text-secondary)',
-                  border: `1px solid ${id === 'live' ? 'var(--success-border)' : 'var(--border-subtle)'}`
-                }}>
+                <span className={`nav-badge ${id === 'live' ? 'live-pulse' : ''}`}>
+                  {id === 'live' && (
+                    <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#10b981', display: 'inline-block', marginRight: 4 }} />
+                  )}
                   {badge}
                 </span>
               )}
@@ -1625,59 +1671,97 @@ export default function App() {
           ))}
         </nav>
 
-        {/* User Card */}
-        <div style={{
-          padding: isSidebarCollapsed ? '10px 6px' : '14px 16px',
-          borderTop: '1px solid var(--border-subtle)',
-          display: 'flex',
-          flexDirection: isSidebarCollapsed ? 'column' : 'row',
-          alignItems: 'center',
-          gap: 10
-        }}>
-          <div style={{
-            width: 32, height: 32, borderRadius: '50%',
-            background: 'var(--bg-elevated)', border: '1px solid var(--border-medium)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-primary)',
-            fontSize: 12, fontWeight: 700, flexShrink: 0
-          }}>
-            {(currentUser?.fullname || currentUser?.username || 'U')[0].toUpperCase()}
-          </div>
-          {!isSidebarCollapsed && (
-            <div style={{ flex: 1, overflow: 'hidden' }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }} className="truncate">
-                {currentUser?.fullname || currentUser?.username}
+        {/* User Profile Footer (Docked Bottom with Discreet Menu) */}
+        <div className="sidebar-profile-card">
+          {/* User Popover Menu */}
+          {isProfileMenuOpen && (
+            <div className="profile-popup-menu" onClick={e => e.stopPropagation()}>
+              <div style={{ padding: '6px 8px 8px', borderBottom: '1px solid var(--border-subtle)', marginBottom: 4 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>
+                  {currentUser?.fullname || currentUser?.username || 'Sayeem Raza'}
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+                  Interviewer Workspace
+                </div>
               </div>
-              <div style={{ fontSize: 10, color: 'var(--text-muted)' }} className="truncate">
-                Interviewer Workspace
+              <button
+                type="button"
+                className="profile-menu-item"
+                onClick={() => { setTheme(t => t === 'white' ? 'black' : 'white'); setIsProfileMenuOpen(false); }}
+              >
+                {theme === 'white' ? <Moon size={13} /> : <Sun size={13} />}
+                <span>Toggle {theme === 'white' ? 'Dark' : 'Light'} Mode</span>
+              </button>
+              <button
+                type="button"
+                className="profile-menu-item"
+                onClick={() => { fetchCandidates(); fetchStats(); setIsProfileMenuOpen(false); addToast('Workspace records synced', 'success'); }}
+              >
+                <RefreshCw size={13} />
+                <span>Sync Data & Stats</span>
+              </button>
+              <div style={{ height: 1, background: 'var(--border-subtle)', margin: '4px 0' }} />
+              <button
+                type="button"
+                className="profile-menu-item danger"
+                onClick={() => { setIsProfileMenuOpen(false); handleLogout(); }}
+              >
+                <LogOut size={13} />
+                <span>Sign Out of Workspace</span>
+              </button>
+            </div>
+          )}
+
+          <div className="profile-avatar">
+            {((currentUser?.fullname || currentUser?.username || 'Sayeem Raza')[0] || 'S').toUpperCase()}
+          </div>
+
+          {!isSidebarCollapsed && (
+            <div className="profile-info">
+              <div className="profile-name truncate">
+                {currentUser?.fullname || currentUser?.username || 'Sayeem Raza'}
+              </div>
+              <div className="profile-role-tag">
+                <span style={{ width: 4, height: 4, borderRadius: '50%', background: 'var(--primary)' }} />
+                <span>Interviewer Workspace</span>
               </div>
             </div>
           )}
+
           <button
-            onClick={handleLogout}
+            onClick={() => setIsProfileMenuOpen(p => !p)}
             className="btn btn-ghost btn-icon btn-sm"
-            title="Sign Out"
+            style={{ marginLeft: 'auto', color: 'var(--text-muted)' }}
+            title="Workspace User Settings"
           >
-            <LogOut size={14} />
+            <MoreVertical size={14} />
           </button>
         </div>
       </aside>
 
       {/* ── MAIN CONTENT VIEWPORT ────────────────────────────────────────── */}
-      <div className="main-content">
+      <div className="main-content" onClick={() => isProfileMenuOpen && setIsProfileMenuOpen(false)}>
         {/* Top Header */}
         <header className="app-header">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <h1 style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>
+          {/* Breadcrumbs Left Hierarchy */}
+          <div className="header-breadcrumb">
+            <span className="header-breadcrumb-root">
+              <Layers size={13} style={{ color: 'var(--primary)' }} />
+              <span>Workspace</span>
+            </span>
+            <span className="header-breadcrumb-sep">/</span>
+            <span className="header-breadcrumb-current">
               {navItems.find(n => n.id === activeSection)?.label}
-            </h1>
+            </span>
             {selectedInterview && activeSection === 'live' && (
-              <span style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                <span>•</span>
+              <span className="header-status-pill">
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#10b981', boxShadow: '0 0 6px #10b981' }} />
                 <span>Candidate: <strong style={{ color: 'var(--text-primary)' }}>{selectedInterview.candidate_name}</strong></span>
               </span>
             )}
           </div>
 
+          {/* Global Actions Right */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             {/* Gemini AI Status Badge (Secure Server-Side Masking) */}
             {aiStatus && (
@@ -1686,23 +1770,23 @@ export default function App() {
                   display: 'inline-flex',
                   alignItems: 'center',
                   gap: 6,
-                  padding: '4px 10px',
-                  borderRadius: 6,
-                  fontSize: 12,
-                  fontFamily: 'JetBrains Mono, monospace',
-                  border: '1px solid var(--border-subtle)',
-                  background: 'var(--bg-subtle)',
+                  padding: '5px 11px',
+                  borderRadius: 9999,
+                  fontSize: 11,
+                  fontFamily: "'JetBrains Mono', monospace",
+                  border: '1px solid var(--border-medium)',
+                  background: 'var(--bg-card)',
                   color: 'var(--text-secondary)'
                 }}
                 title={aiStatus.configured ? `Gemini AI (${aiStatus.model}) connected` : 'Gemini API Key missing in backend/.env'}
               >
                 <span
                   style={{
-                    width: 7,
-                    height: 7,
+                    width: 6,
+                    height: 6,
                     borderRadius: '50%',
                     backgroundColor: aiStatus.configured ? '#10b981' : '#f59e0b',
-                    boxShadow: aiStatus.configured ? '0 0 6px rgba(16, 185, 129, 0.4)' : 'none'
+                    boxShadow: aiStatus.configured ? '0 0 6px rgba(16, 185, 129, 0.5)' : 'none'
                   }}
                 />
                 <span style={{ fontWeight: 600 }}>Gemini:</span>
@@ -1712,7 +1796,7 @@ export default function App() {
               </div>
             )}
 
-            {/* Strictly Two Theme Options: White and Black */}
+            {/* Segmented Two-Theme Switcher (White & Black) */}
             <div className="theme-toggle-segmented" role="radiogroup" aria-label="Color Theme">
               <button
                 type="button"
@@ -1722,7 +1806,7 @@ export default function App() {
                 role="radio"
                 title="Switch to White theme"
               >
-                <Sun size={13} />
+                <Sun size={12} />
                 <span>White</span>
               </button>
               <button
@@ -1733,27 +1817,49 @@ export default function App() {
                 role="radio"
                 title="Switch to Black theme"
               >
-                <Moon size={13} />
+                <Moon size={12} />
                 <span>Black</span>
               </button>
             </div>
 
-            {/* Top Quick Actions */}
-            <button
-              onClick={() => setIsAddCandidateOpen(true)}
-              className="btn btn-primary btn-sm"
-            >
-              <Plus size={13} />
-              <span>Add Candidate</span>
-            </button>
-
+            {/* Refresh Workspace Records (Ghost/Outline) */}
             <button
               onClick={() => { fetchCandidates(); fetchStats(); }}
               className="btn btn-secondary btn-icon btn-sm"
-              title="Refresh Records"
+              title="Refresh Workspace Data"
             >
               <RefreshCw size={13} />
             </button>
+
+            {/* Section-Specific Primary CTA */}
+            {activeSection === 'questions' ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <button
+                  onClick={handleAiGenerateQuestions}
+                  disabled={isAiGeneratingQuestions}
+                  className="btn btn-secondary btn-sm"
+                  title="Generate questions using AI synthesis"
+                >
+                  <Sparkles size={13} style={{ color: 'var(--primary)' }} />
+                  <span>{isAiGeneratingQuestions ? 'Generating...' : 'AI Generate'}</span>
+                </button>
+                <button
+                  onClick={() => { resetQuestionForm(); setQBankView('form'); }}
+                  className="btn btn-primary btn-sm"
+                >
+                  <Plus size={13} />
+                  <span>New Question</span>
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setIsAddCandidateOpen(true)}
+                className="btn btn-primary btn-sm"
+              >
+                <Plus size={13} />
+                <span>Add Candidate</span>
+              </button>
+            )}
           </div>
         </header>
 
@@ -2507,24 +2613,23 @@ export default function App() {
              ══════════════════════════════════════════════════════════════ */}
           {activeSection === 'candidates' && (
             <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              {/* Search & Filter Toolbar */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ display: 'flex', gap: 10 }}>
-                  <div style={{ position: 'relative' }}>
-                    <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+              {/* Segmented Filter & Action Toolbar */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+                <div className="toolbar-segmented">
+                  <div className="toolbar-search-box">
+                    <Search size={13} className="toolbar-search-icon" />
                     <input
-                      placeholder="Search candidates..."
+                      placeholder="Search candidates by name, role or email..."
                       value={searchQuery}
                       onChange={e => setSearchQuery(e.target.value)}
-                      className="form-input"
-                      style={{ paddingLeft: 30, width: 220, fontSize: 12 }}
+                      className="toolbar-search-input"
+                      style={{ width: 280 }}
                     />
                   </div>
                   <select
                     value={filterStatus}
                     onChange={e => setFilterStatus(e.target.value)}
-                    className="form-select"
-                    style={{ width: 130, fontSize: 12 }}
+                    className="toolbar-select"
                   >
                     <option value="all">All Status</option>
                     <option value="active">Active</option>
@@ -2532,12 +2637,26 @@ export default function App() {
                     <option value="completed">Completed</option>
                     <option value="terminated">Terminated</option>
                   </select>
+                  {(searchQuery || filterStatus !== 'all') && (
+                    <button
+                      onClick={() => { setSearchQuery(''); setFilterStatus('all'); }}
+                      className="btn btn-ghost btn-sm"
+                      style={{ fontSize: 11, padding: '4px 8px', color: 'var(--text-muted)' }}
+                    >
+                      Clear Filters
+                    </button>
+                  )}
                 </div>
 
-                <button onClick={() => setIsAddCandidateOpen(true)} className="btn btn-primary btn-sm">
-                  <Plus size={13} />
-                  <span>Register Candidate</span>
-                </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 500 }}>
+                    {processedCandidates.length} candidate{processedCandidates.length === 1 ? '' : 's'}
+                  </span>
+                  <button onClick={() => setIsAddCandidateOpen(true)} className="btn btn-primary btn-sm">
+                    <Plus size={13} />
+                    <span>Register Candidate</span>
+                  </button>
+                </div>
               </div>
 
               {/* Candidates Table */}
@@ -2551,77 +2670,102 @@ export default function App() {
                       <th>Trust Score</th>
                       <th>Decision</th>
                       <th>Date</th>
-                      <th>Actions</th>
+                      <th style={{ textAlign: 'right' }}>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {processedCandidates.map(c => (
-                      <tr key={c.candidate_id}>
-                        <td>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                            <div style={{ width: 32, height: 32, borderRadius: 8, background: 'var(--bg-elevated)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, color: 'var(--primary)', fontSize: 12 }}>
-                              {(c.candidate_name || 'C')[0].toUpperCase()}
-                            </div>
-                            <div>
-                              <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>{c.candidate_name}</p>
-                              <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: 0 }}>{c.email || c.fullname || '—'}</p>
-                            </div>
-                          </div>
-                        </td>
-                        <td style={{ fontSize: 12 }}>{c.job_role || 'Software Engineer'}</td>
-                        <td><span className={`badge badge-${c.status}`}>{c.status}</span></td>
-                        <td>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <div className="trust-bar-track" style={{ width: 64 }}>
-                              <div className={`trust-bar-fill ${getTrustClass(c.trust_score || 100)}`} style={{ width: `${c.trust_score || 100}%` }} />
-                            </div>
-                            <span style={{ fontSize: 12, fontWeight: 800, fontFamily: 'JetBrains Mono', color: getTrustColor(c.trust_score || 100) }}>
-                              {Math.round(c.trust_score || 100)}%
-                            </span>
-                          </div>
-                        </td>
-                        <td><span className={`badge badge-${c.decision || 'pending'}`}>{c.decision || 'pending'}</span></td>
-                        <td style={{ fontSize: 11, color: 'var(--text-muted)' }}>{formatDate(c.date)}</td>
-                        <td>
-                          <div style={{ display: 'flex', gap: 6 }}>
-                            <button
-                              onClick={() => {
-                                setSelectedInterview({
-                                  id: c.interview_id,
-                                  candidate_id: c.candidate_id,
-                                  candidate_name: c.candidate_name,
-                                  fullname: c.fullname,
-                                  trust_score: c.trust_score,
-                                  status: c.status
-                                });
-                                setActiveSection('live');
-                              }}
-                              className="btn btn-secondary btn-icon btn-sm"
-                              title="Open Live Monitor"
-                            >
-                              <Monitor size={12} />
-                            </button>
-                            {c.status === 'scheduled' && (
-                              <button
-                                onClick={() => handleActivateInterview(c.interview_id)}
-                                className="btn btn-success btn-icon btn-sm"
-                                title="Activate Session"
-                              >
-                                <Play size={12} />
-                              </button>
-                            )}
-                            <button
-                              onClick={() => handleDeleteCandidate(c.candidate_id, c.candidate_name)}
-                              className="btn btn-ghost btn-icon btn-sm"
-                              style={{ color: 'var(--danger)' }}
-                              title="Delete Record"
-                            >
-                              <Trash2 size={12} />
-                            </button>
-                          </div>
+                    {processedCandidates.length === 0 ? (
+                      <tr>
+                        <td colSpan="7" style={{ textAlign: 'center', padding: '36px 20px', color: 'var(--text-muted)' }}>
+                          No candidates found matching the selected filters.
                         </td>
                       </tr>
-                    ))}
+                    ) : (
+                      processedCandidates.map(c => (
+                        <tr key={c.candidate_id}>
+                          <td>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                              <div style={{
+                                width: 32,
+                                height: 32,
+                                borderRadius: 8,
+                                background: 'var(--bg-elevated)',
+                                border: '1px solid var(--border-subtle)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontWeight: 700,
+                                color: 'var(--primary)',
+                                fontSize: 12,
+                                flexShrink: 0
+                              }}>
+                                {(c.candidate_name || 'C')[0].toUpperCase()}
+                              </div>
+                              <div style={{ minWidth: 0 }}>
+                                <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>{c.candidate_name}</p>
+                                <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: 0 }} className="truncate">{c.email || c.fullname || '—'}</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{c.job_role || 'Software Engineer'}</td>
+                          <td><span className={`badge badge-${c.status}`}>{c.status}</span></td>
+                          <td>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <div className="trust-bar-track" style={{ width: 64 }}>
+                                <div className={`trust-bar-fill ${getTrustClass(c.trust_score || 100)}`} style={{ width: `${c.trust_score || 100}%` }} />
+                              </div>
+                              <span style={{ fontSize: 12, fontWeight: 800, fontFamily: 'JetBrains Mono', color: getTrustColor(c.trust_score || 100) }}>
+                                {Math.round(c.trust_score || 100)}%
+                              </span>
+                            </div>
+                          </td>
+                          <td>
+                            <span className={`badge ${c.decision === 'hire' ? 'badge-hire' : c.decision === 'reject' ? 'badge-reject' : 'badge-hold'}`}>
+                              {c.decision || 'pending'}
+                            </span>
+                          </td>
+                          <td style={{ fontSize: 11, color: 'var(--text-muted)' }}>{formatDate(c.date)}</td>
+                          <td>
+                            <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', alignItems: 'center' }}>
+                              <button
+                                onClick={() => {
+                                  setSelectedInterview({
+                                    id: c.interview_id,
+                                    candidate_id: c.candidate_id,
+                                    candidate_name: c.candidate_name,
+                                    fullname: c.fullname,
+                                    trust_score: c.trust_score,
+                                    status: c.status
+                                  });
+                                  setActiveSection('live');
+                                }}
+                                className="btn btn-secondary btn-icon btn-sm"
+                                title="Open Live Monitor"
+                              >
+                                <Monitor size={12} />
+                              </button>
+                              {c.status === 'scheduled' && (
+                                <button
+                                  onClick={() => handleActivateInterview(c.interview_id)}
+                                  className="btn btn-success btn-icon btn-sm"
+                                  title="Activate Session"
+                                >
+                                  <Play size={12} />
+                                </button>
+                              )}
+                              <button
+                                onClick={() => handleDeleteCandidate(c.candidate_id, c.candidate_name)}
+                                className="btn btn-ghost btn-icon btn-sm"
+                                style={{ color: 'var(--danger)' }}
+                                title="Delete Record"
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
@@ -2633,24 +2777,23 @@ export default function App() {
              ══════════════════════════════════════════════════════════════ */}
           {activeSection === 'questions' && (
             <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              {/* Toolbar */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ display: 'flex', gap: 10 }}>
-                  <div style={{ position: 'relative' }}>
-                    <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+              {/* Segmented Filter & Action Toolbar */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+                <div className="toolbar-segmented">
+                  <div className="toolbar-search-box">
+                    <Search size={13} className="toolbar-search-icon" />
                     <input
-                      placeholder="Search questions..."
+                      placeholder="Search question bank..."
                       value={qFilter.search}
                       onChange={e => setQFilter(p => ({ ...p, search: e.target.value }))}
-                      className="form-input"
-                      style={{ paddingLeft: 30, width: 200, fontSize: 12 }}
+                      className="toolbar-search-input"
+                      style={{ width: 240 }}
                     />
                   </div>
                   <select
                     value={qFilter.type}
                     onChange={e => setQFilter(p => ({ ...p, type: e.target.value }))}
-                    className="form-select"
-                    style={{ width: 130, fontSize: 12 }}
+                    className="toolbar-select"
                   >
                     <option value="all">All Types</option>
                     <option value="coding">Coding</option>
@@ -2661,23 +2804,32 @@ export default function App() {
                   <select
                     value={qFilter.difficulty}
                     onChange={e => setQFilter(p => ({ ...p, difficulty: e.target.value }))}
-                    className="form-select"
-                    style={{ width: 120, fontSize: 12 }}
+                    className="toolbar-select"
                   >
                     <option value="all">All Difficulty</option>
                     <option value="easy">Easy</option>
                     <option value="medium">Medium</option>
                     <option value="hard">Hard</option>
                   </select>
+                  {(qFilter.search || qFilter.type !== 'all' || qFilter.difficulty !== 'all') && (
+                    <button
+                      onClick={() => setQFilter({ search: '', type: 'all', difficulty: 'all' })}
+                      className="btn btn-ghost btn-sm"
+                      style={{ fontSize: 11, padding: '4px 8px', color: 'var(--text-muted)' }}
+                    >
+                      Clear Filters
+                    </button>
+                  )}
                 </div>
 
-                <div style={{ display: 'flex', gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <button
                     onClick={handleAiGenerateQuestions}
                     disabled={isAiGeneratingQuestions}
                     className="btn btn-secondary btn-sm"
+                    title="Generate questions with AI Engine"
                   >
-                    <Sparkles size={13} />
+                    <Sparkles size={13} style={{ color: 'var(--primary)' }} />
                     <span>{isAiGeneratingQuestions ? 'Generating...' : 'AI Generate Questions'}</span>
                   </button>
 
@@ -2746,7 +2898,7 @@ export default function App() {
                     </div>
                     <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 10 }}>
                       <button type="button" onClick={() => { setQBankView('list'); resetQuestionForm(); }} className="btn btn-secondary">Cancel</button>
-                      <button type="submit" className="btn btn-primary"><Save size={13} /> Save Question</button>
+                      <button type="submit" className="btn btn-primary"><Save size={13} /> {editingQuestion ? 'Update Question' : 'Save Question'}</button>
                     </div>
                   </form>
                 </div>
@@ -2755,56 +2907,79 @@ export default function App() {
                   <table className="data-table">
                     <thead>
                       <tr>
-                        <th>Title</th>
+                        <th>Title & Description</th>
                         <th>Type</th>
                         <th>Difficulty</th>
                         <th>Topic</th>
                         <th>Tags</th>
-                        <th style={{ textAlign: 'right', minWidth: 160 }}>Actions</th>
+                        <th style={{ textAlign: 'right', minWidth: 180 }}>Actions</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {processedQuestions.map(q => (
-                        <tr key={q._id}>
-                          <td>
-                            <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>{q.title}</p>
-                            <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: 0, maxWidth: 320 }} className="truncate">{q.description}</p>
-                          </td>
-                          <td><span className="badge badge-scheduled" style={{ fontSize: 10 }}>{q.type}</span></td>
-                          <td><span className={`diff-${q.difficulty}`}>{q.difficulty}</span></td>
-                          <td style={{ fontSize: 12 }}>{q.topic || '—'}</td>
-                          <td>
-                            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                              {(q.tags || []).slice(0, 3).map(t => (
-                                <span key={t} style={{ fontSize: 10, padding: '1px 6px', borderRadius: 4, background: 'var(--bg-elevated)', color: 'var(--text-secondary)' }}>{t}</span>
-                              ))}
-                            </div>
-                          </td>
-                          <td>
-                            <div style={{ display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'flex-end' }}>
-                              <button
-                                type="button"
-                                onClick={() => handleOpenSendModal(q)}
-                                className="btn btn-primary btn-sm"
-                                style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 10px', fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap' }}
-                                title="Send Question to Candidate"
-                              >
-                                <Send size={11} />
-                                <span>Send to Candidate</span>
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteQuestion(q)}
-                                className="btn btn-ghost btn-sm btn-icon"
-                                style={{ color: 'var(--danger)' }}
-                                title="Delete Question"
-                              >
-                                <Trash2 size={12} />
-                              </button>
-                            </div>
+                      {processedQuestions.length === 0 ? (
+                        <tr>
+                          <td colSpan="6" style={{ textAlign: 'center', padding: '36px 20px', color: 'var(--text-muted)' }}>
+                            No questions found matching your filter criteria.
                           </td>
                         </tr>
-                      ))}
+                      ) : (
+                        processedQuestions.map(q => (
+                          <tr key={q._id}>
+                            <td>
+                              <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>{q.title}</p>
+                              <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '2px 0 0', maxWidth: 360 }} className="truncate">{q.description}</p>
+                            </td>
+                            <td>
+                              <span className="type-pill">{q.type}</span>
+                            </td>
+                            <td>
+                              <span className={`diff-pill ${q.difficulty}`}>
+                                <span className="diff-pill-dot" />
+                                {q.difficulty}
+                              </span>
+                            </td>
+                            <td style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{q.topic || '—'}</td>
+                            <td>
+                              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                                {(q.tags || []).slice(0, 3).map(t => (
+                                  <span key={t} className="tag-pill">{t}</span>
+                                ))}
+                              </div>
+                            </td>
+                            <td>
+                              <div style={{ display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'flex-end' }}>
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenSendModal(q)}
+                                  className="btn btn-primary btn-sm"
+                                  style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 10px', fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap' }}
+                                  title="Send Question to Candidate"
+                                >
+                                  <Send size={11} />
+                                  <span>Send to Candidate</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleEditQuestion(q)}
+                                  className="btn btn-ghost btn-sm btn-icon"
+                                  title="Edit Question"
+                                >
+                                  <Edit size={12} />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteQuestion(q)}
+                                  className="btn btn-ghost btn-sm btn-icon"
+                                  style={{ color: 'var(--danger)' }}
+                                  title="Delete Question"
+                                >
+                                  <Trash2 size={12} />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))
+                      )}
                     </tbody>
                   </table>
                 </div>
