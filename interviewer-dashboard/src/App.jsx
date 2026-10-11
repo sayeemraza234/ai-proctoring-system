@@ -15,6 +15,7 @@ import LiveStream from './components/LiveStream';
 import AlertsPanel from './components/AlertsPanel';
 import ReportView from './components/ReportView';
 import CandidateExamKiosk from './components/CandidateExamKiosk';
+import LiveMonitoringView from './components/LiveMonitoringView';
 import { io } from 'socket.io-client';
 
 const BACKEND = (() => {
@@ -369,11 +370,24 @@ export default function App() {
   const [targetCandidateId, setTargetCandidateId] = useState('');
   const [isAssigningToCandidate, setIsAssigningToCandidate] = useState(false);
 
+  // Global proctoring incidents for Live Audit Feed
+  const [globalIncidents, setGlobalIncidents] = useState([]);
+
   const proctorSocketRef = useRef(null);
   const chatSocketRef = useRef(null);
   const notesTimerRef = useRef(null);
 
   // ── API Helpers ────────────────────────────────────────────────────────────
+  const fetchIncidents = useCallback(async () => {
+    try {
+      const res = await fetch(`${BACKEND}/api/incidents`);
+      if (res.ok) {
+        const data = await res.json();
+        setGlobalIncidents(data);
+      }
+    } catch {}
+  }, []);
+
   const fetchCandidates = useCallback(async () => {
     try {
       const res = await fetch(`${BACKEND}/api/candidates`);
@@ -450,10 +464,16 @@ export default function App() {
       fetchStats();
       fetchQuestions();
       fetchAiStatus();
-      const interval = setInterval(() => { fetchCandidates(); fetchStats(); fetchAiStatus(); }, 12000);
+      fetchIncidents();
+      const interval = setInterval(() => {
+        fetchCandidates();
+        fetchStats();
+        fetchAiStatus();
+        fetchIncidents();
+      }, 12000);
       return () => clearInterval(interval);
     }
-  }, [view, fetchCandidates, fetchStats, fetchQuestions, fetchAiStatus]);
+  }, [view, fetchCandidates, fetchStats, fetchQuestions, fetchAiStatus, fetchIncidents]);
 
   useEffect(() => {
     if (view === 'interviewer' && activeSection === 'questions') fetchQuestions();
@@ -461,48 +481,75 @@ export default function App() {
 
   // Connect proctor socket for interviewer
   useEffect(() => {
-    if (view === 'interviewer' && selectedInterview?.id) {
+    if (view === 'interviewer') {
+      if (!proctorSocketRef.current) {
+        const pSock = io(`${BACKEND}/proctor`);
+        proctorSocketRef.current = pSock;
+
+        pSock.on('connect', () => {
+          console.log('[PROCTOR] Connected to proctor namespace');
+        });
+
+        pSock.on('global_proctor_alert', (alert) => {
+          setGlobalIncidents(prev => [alert, ...prev].slice(0, 60));
+          if (alert.roomId && alert.trustScore !== undefined) {
+            setAllCandidates(prev => prev.map(c =>
+              String(c.interview_id) === String(alert.roomId)
+                ? { ...c, trust_score: alert.trustScore }
+                : c
+            ));
+          }
+        });
+      }
+
+      const pSock = proctorSocketRef.current;
+
+      if (selectedInterview?.id) {
+        pSock.emit('join_room', String(selectedInterview.id));
+
+        const handleAnswerUpdated = ({ questionIndex, questionId, answer }) => {
+          setCandidateLiveCode(answer || '');
+          const resolvedIndex = Number.isInteger(questionIndex) ? questionIndex : 0;
+          setCodeAnswers(prev => ({ ...prev, [resolvedIndex]: answer }));
+        };
+
+        const handleScoreUpdate = ({ score }) => {
+          setSelectedInterview(prev => prev ? { ...prev, trust_score: score } : null);
+          setAllCandidates(prev => prev.map(c => c.interview_id === selectedInterview.id ? { ...c, trust_score: score } : c));
+        };
+
+        pSock.on('answer_updated', handleAnswerUpdated);
+        pSock.on('score_update', handleScoreUpdate);
+
+        // Connect chat socket as well
+        if (chatSocketRef.current) chatSocketRef.current.disconnect();
+        const cSock = io(`${BACKEND}/chat`);
+        chatSocketRef.current = cSock;
+        cSock.emit('join_room', String(selectedInterview.id));
+        cSock.on('new_message', (msg) => {
+          setChatMessages(prev => [...prev, msg]);
+        });
+
+        // Fetch existing chat history
+        fetch(`${BACKEND}/api/interviews/${selectedInterview.id}/chat`)
+          .then(r => r.json())
+          .then(data => { if (Array.isArray(data)) setChatMessages(data); })
+          .catch(() => {});
+
+        return () => {
+          pSock.off('answer_updated', handleAnswerUpdated);
+          pSock.off('score_update', handleScoreUpdate);
+        };
+      }
+    } else {
       if (proctorSocketRef.current) {
         proctorSocketRef.current.disconnect();
-      }
-      const pSock = io(`${BACKEND}/proctor`);
-      proctorSocketRef.current = pSock;
-
-      pSock.on('connect', () => {
-        pSock.emit('join_room', String(selectedInterview.id));
-        console.log('[PROCTOR] Joined room:', selectedInterview.id);
-      });
-
-      pSock.on('answer_updated', ({ questionIndex, questionId, answer }) => {
-        setCandidateLiveCode(answer || '');
-        const resolvedIndex = Number.isInteger(questionIndex) ? questionIndex : 0;
-        setCodeAnswers(prev => ({ ...prev, [resolvedIndex]: answer }));
-      });
-
-      pSock.on('score_update', ({ score }) => {
-        setSelectedInterview(prev => prev ? { ...prev, trust_score: score } : null);
-        setAllCandidates(prev => prev.map(c => c.interview_id === selectedInterview.id ? { ...c, trust_score: score } : c));
-      });
-
-      // Connect chat socket as well
-      const cSock = io(`${BACKEND}/chat`);
-      chatSocketRef.current = cSock;
-      cSock.emit('join_room', String(selectedInterview.id));
-      cSock.on('new_message', (msg) => {
-        setChatMessages(prev => [...prev, msg]);
-      });
-
-      // Fetch existing chat history
-      fetch(`${BACKEND}/api/interviews/${selectedInterview.id}/chat`)
-        .then(r => r.json())
-        .then(data => { if (Array.isArray(data)) setChatMessages(data); })
-        .catch(() => {});
-
-      return () => {
-        pSock.disconnect();
         proctorSocketRef.current = null;
-        if (chatSocketRef.current) chatSocketRef.current.disconnect();
-      };
+      }
+      if (chatSocketRef.current) {
+        chatSocketRef.current.disconnect();
+        chatSocketRef.current = null;
+      }
     }
   }, [view, selectedInterview?.id]);
 
@@ -665,6 +712,96 @@ export default function App() {
         details: `Interviewer Notice: ${warningText}`
       });
       addToast(`Broadcasted: "${warningText}"`, 'info');
+    }
+  };
+
+  const handleSendProctorWarning = async (candidate, warningText) => {
+    const interviewId = candidate.interview_id || candidate.id || selectedInterview?.id;
+    if (!interviewId) return;
+
+    // 1. Emit via socket
+    if (proctorSocketRef.current) {
+      proctorSocketRef.current.emit('send_warning', {
+        roomId: String(interviewId),
+        message: warningText,
+        warningType: 'PROCTOR_WARNING'
+      });
+    }
+
+    // 2. Persist to backend database
+    try {
+      await fetch(`${BACKEND}/api/interviews/${interviewId}/warning`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: warningText, warningType: 'PROCTOR_WARNING' })
+      });
+      addToast(`Warning delivered to ${candidate.candidate_name || candidate.fullname}`, 'warning');
+    } catch (err) {
+      console.warn('Backend warning persistence error:', err);
+    }
+  };
+
+  const handleFlagProctorIncident = async (candidate, incidentData) => {
+    const interviewId = candidate.interview_id || candidate.id || selectedInterview?.id;
+    if (!interviewId) return;
+
+    // 1. Emit via socket
+    if (proctorSocketRef.current) {
+      proctorSocketRef.current.emit('flag_incident', {
+        roomId: String(interviewId),
+        tag: incidentData.tag,
+        severity: incidentData.severity,
+        details: incidentData.details,
+        penalty: incidentData.penalty
+      });
+    }
+
+    // 2. Persist to backend
+    try {
+      const res = await fetch(`${BACKEND}/api/interviews/${interviewId}/incident`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(incidentData)
+      });
+      if (res.ok) {
+        const d = await res.json();
+        if (d.updatedScore !== undefined) {
+          setAllCandidates(prev => prev.map(c =>
+            (String(c.interview_id) === String(interviewId) || String(c.candidate_id) === String(candidate.candidate_id))
+              ? { ...c, trust_score: d.updatedScore }
+              : c
+          ));
+          if (selectedInterview && String(selectedInterview.id) === String(interviewId)) {
+            setSelectedInterview(prev => prev ? { ...prev, trust_score: d.updatedScore } : null);
+          }
+        }
+      }
+      addToast(`Incident flagged: ${incidentData.tag}`, 'error');
+    } catch (err) {
+      console.warn('Backend flag incident error:', err);
+    }
+  };
+
+  const handleTerminateFromMonitoring = async (interviewId, reason, decisionChoice = 'reject') => {
+    try {
+      const res = await fetch(`${BACKEND}/api/interviews/${interviewId}/terminate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason, decision: decisionChoice })
+      });
+      if (res.ok) {
+        if (proctorSocketRef.current) {
+          proctorSocketRef.current.emit('terminate_interview', {
+            roomId: String(interviewId),
+            reason,
+            decision: decisionChoice
+          });
+        }
+        addToast('Interview session terminated.', 'error');
+        fetchCandidates();
+      }
+    } catch {
+      addToast('Error terminating session.', 'error');
     }
   };
 
@@ -2034,577 +2171,45 @@ export default function App() {
              SECTION: LIVE MONITOR (REVOLUTIONIZED WORKSPACE)
              ══════════════════════════════════════════════════════════════ */}
           {activeSection === 'live' && (
-            <div className="animate-fade-in" style={{ display: 'flex', gap: 14, height: 'calc(100vh - 104px)', overflow: 'hidden' }}>
-
-              {/* 1. Collapsible Candidate List Drawer */}
-              {isCandidateDrawerOpen && (
-                <aside className="card" style={{ width: 260, flexShrink: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-                  <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--border-subtle)' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>Candidates</span>
-                      <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{processedCandidates.length}</span>
-                    </div>
-                    <div style={{ position: 'relative' }}>
-                      <Search size={12} style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-                      <input
-                        type="text"
-                        placeholder="Search candidate..."
-                        value={searchQuery}
-                        onChange={e => setSearchQuery(e.target.value)}
-                        className="form-input"
-                        style={{ paddingLeft: 26, fontSize: 11, padding: '5px 8px 5px 26px' }}
-                      />
-                    </div>
-                  </div>
-
-                  <div style={{ flex: 1, overflowY: 'auto', padding: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                    {processedCandidates.length === 0 ? (
-                      <div style={{ textAlign: 'center', padding: '30px 10px', color: 'var(--text-muted)', fontSize: 12 }}>
-                        No candidates found
-                      </div>
-                    ) : (
-                      processedCandidates.map(c => {
-                        const isSelected = selectedInterview?.candidate_id === c.candidate_id;
-                        return (
-                          <div
-                            key={c.candidate_id}
-                            onClick={() => setSelectedInterview({
-                              id: c.interview_id,
-                              candidate_id: c.candidate_id,
-                              candidate_name: c.candidate_name,
-                              fullname: c.fullname,
-                              trust_score: c.trust_score,
-                              status: c.status
-                            })}
-                            style={{
-                              padding: '8px 10px',
-                              borderRadius: 8,
-                              background: isSelected ? 'var(--primary-light)' : 'transparent',
-                              border: `1px solid ${isSelected ? 'var(--primary-border)' : 'transparent'}`,
-                              cursor: 'pointer',
-                              display: 'flex',
-                              flexDirection: 'column',
-                              gap: 4,
-                              transition: 'all 0.15s ease'
-                            }}
-                          >
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                              <span style={{ fontSize: 12, fontWeight: isSelected ? 700 : 600, color: isSelected ? 'var(--primary)' : 'var(--text-primary)' }} className="truncate">
-                                {c.candidate_name}
-                              </span>
-                              <span className={`badge badge-${c.status}`} style={{ fontSize: 9 }}>{c.status}</span>
-                            </div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                              <div className="trust-bar-track" style={{ flex: 1, height: 4 }}>
-                                <div className={`trust-bar-fill ${getTrustClass(c.trust_score || 100)}`} style={{ width: `${c.trust_score || 100}%` }} />
-                              </div>
-                              <span style={{ fontSize: 10, fontFamily: 'JetBrains Mono', fontWeight: 700, color: getTrustColor(c.trust_score || 100) }}>
-                                {Math.round(c.trust_score || 100)}%
-                              </span>
-                            </div>
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                </aside>
-              )}
-
-              {/* 2. Main Live Center Hub */}
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0, overflow: 'hidden' }}>
-                {selectedInterview ? (() => {
-                  const currentCandidate = allCandidates.find(c => c.interview_id === selectedInterview.id) || selectedInterview;
-                  const isCandidateActive = currentCandidate.status === 'active';
-
-                  return (
-                    <>
-                      {/* Top Bar for Selected Candidate */}
-                      <div className="card" style={{
-                        padding: '8px 16px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        borderRadius: 10,
-                        flexShrink: 0
-                      }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-                          <button
-                            onClick={() => setIsCandidateDrawerOpen(o => !o)}
-                            className="btn btn-ghost btn-icon btn-sm"
-                            title={isCandidateDrawerOpen ? 'Hide Candidates List' : 'Show Candidates List'}
-                          >
-                            <Users size={14} />
-                          </button>
-
-                          <div style={{
-                            width: 32, height: 32, borderRadius: 8,
-                            background: 'var(--primary-light)', border: '1px solid var(--primary-border)',
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            color: 'var(--primary)', fontWeight: 800, fontSize: 13, flexShrink: 0
-                          }}>
-                            {(currentCandidate.candidate_name || 'C')[0].toUpperCase()}
-                          </div>
-
-                          <div style={{ minWidth: 0 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                              <h2 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', margin: 0 }} className="truncate">
-                                {currentCandidate.candidate_name}
-                              </h2>
-                              <span className={`badge ${isCandidateActive ? 'badge-active' : 'badge-scheduled'}`}>
-                                {isCandidateActive ? 'LIVE' : currentCandidate.status}
-                              </span>
-                            </div>
-                            <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', gap: 8 }}>
-                              <span>Role: {currentCandidate.role || 'Software Engineer'}</span>
-                              <span>•</span>
-                              <span>Trust: <strong style={{ color: getTrustColor(currentCandidate.trust_score || 100) }}>{Math.round(currentCandidate.trust_score || 100)}%</strong></span>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Top Controls: Layout mode & Actions */}
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          {/* Layout mode switcher */}
-                          <div style={{ display: 'flex', gap: 2, background: 'var(--bg-elevated)', padding: 2, borderRadius: 6, border: '1px solid var(--border-subtle)' }}>
-                            <button
-                              onClick={() => setMonitorLayoutMode('split')}
-                              className="btn btn-ghost btn-icon btn-sm"
-                              style={{ background: monitorLayoutMode === 'split' ? 'var(--bg-card)' : 'transparent', color: monitorLayoutMode === 'split' ? 'var(--primary)' : 'var(--text-muted)' }}
-                              title="Split Mode (Video & Live Code)"
-                            >
-                              <Split size={13} />
-                            </button>
-                            <button
-                              onClick={() => setMonitorLayoutMode('videoFocus')}
-                              className="btn btn-ghost btn-icon btn-sm"
-                              style={{ background: monitorLayoutMode === 'videoFocus' ? 'var(--bg-card)' : 'transparent', color: monitorLayoutMode === 'videoFocus' ? 'var(--primary)' : 'var(--text-muted)' }}
-                              title="Video Focus Mode"
-                            >
-                              <Camera size={13} />
-                            </button>
-                            <button
-                              onClick={() => setMonitorLayoutMode('codeFocus')}
-                              className="btn btn-ghost btn-icon btn-sm"
-                              style={{ background: monitorLayoutMode === 'codeFocus' ? 'var(--bg-card)' : 'transparent', color: monitorLayoutMode === 'codeFocus' ? 'var(--primary)' : 'var(--text-muted)' }}
-                              title="Code & Execution Focus Mode"
-                            >
-                              <Code size={13} />
-                            </button>
-                          </div>
-
-                          {/* AI Evaluation */}
-                          <button
-                            onClick={runAiEvaluation}
-                            disabled={isEvaluating}
-                            className="btn btn-secondary btn-sm"
-                            title="Run automated Gemini AI Code & Proctoring evaluation"
-                          >
-                            <Sparkles size={12} />
-                            <span>{isEvaluating ? 'Evaluating...' : 'AI Evaluation'}</span>
-                          </button>
-
-                          {/* Toggle Proctoring Drawer */}
-                          <button
-                            onClick={() => setIsProctorDrawerOpen(d => !d)}
-                            className="btn btn-secondary btn-icon btn-sm"
-                            style={{ color: isProctorDrawerOpen ? 'var(--primary)' : 'var(--text-muted)' }}
-                            title="Toggle Proctoring Telemetry Panel"
-                          >
-                            <Shield size={13} />
-                          </button>
-
-                          {/* Conclude Session CTA */}
-                          {isCandidateActive && (
-                            <button
-                              onClick={() => setShowTerminateModal(true)}
-                              className="btn btn-danger btn-sm"
-                            >
-                              <PhoneOff size={12} />
-                              <span>End Session</span>
-                            </button>
-                          )}
-
-                          {currentCandidate.status === 'scheduled' && (
-                            <button
-                              onClick={() => handleActivateInterview(currentCandidate.interview_id || selectedInterview.id)}
-                              className="btn btn-success btn-sm"
-                            >
-                              <Play size={12} />
-                              <span>Activate Session</span>
-                            </button>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Workspace Content by Layout Mode */}
-                      <div style={{ flex: 1, display: 'flex', gap: 12, minHeight: 0, overflow: 'hidden' }}>
-
-                        {/* Left / Top Stage: Video */}
-                        {(monitorLayoutMode === 'split' || monitorLayoutMode === 'videoFocus') && (
-                          <div style={{
-                            flex: monitorLayoutMode === 'videoFocus' ? 1 : '0 0 50%',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            gap: 10,
-                            minWidth: 0,
-                            overflow: 'hidden'
-                          }}>
-                            {/* Live Video Stream Component */}
-                            <LiveStream
-                              roomId={selectedInterview.id}
-                              candidateName={selectedInterview.candidate_name}
-                              compact={monitorLayoutMode === 'split'}
-                            />
-
-                            {/* Docked Tabs for Notes & Actions */}
-                            <div className="card" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 180 }}>
-                              {/* Tab Headers */}
-                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 12px', borderBottom: '1px solid var(--border-subtle)', background: 'var(--bg-surface)' }}>
-                                <div style={{ display: 'flex', gap: 4 }}>
-                                  {[
-                                    { id: 'notes', label: 'Evaluation & Rubric', icon: FileText },
-                                    { id: 'question', label: 'Push Live Question', icon: PlusCircle },
-                                    { id: 'aiCopilot', label: 'AI Co-Pilot', icon: Sparkles },
-                                    { id: 'profile', label: 'Candidate Profile', icon: User },
-                                  ].map(tab => {
-                                    const Icon = tab.icon;
-                                    const isActive = activeLiveTab === tab.id;
-                                    return (
-                                      <button
-                                        key={tab.id}
-                                        onClick={() => setActiveLiveTab(tab.id)}
-                                        className="btn btn-ghost btn-sm"
-                                        style={{
-                                          fontSize: 11,
-                                          fontWeight: isActive ? 700 : 500,
-                                          background: isActive ? 'var(--primary-light)' : 'transparent',
-                                          color: isActive ? 'var(--primary)' : 'var(--text-secondary)',
-                                          border: `1px solid ${isActive ? 'var(--primary-border)' : 'transparent'}`
-                                        }}
-                                      >
-                                        <Icon size={12} />
-                                        <span>{tab.label}</span>
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-
-                                {activeLiveTab === 'notes' && (
-                                  <span style={{ fontSize: 10, color: isSavingNotes ? 'var(--warning)' : 'var(--text-muted)' }}>
-                                    {isSavingNotes ? 'Saving...' : 'Autosaved'}
-                                  </span>
-                                )}
-                              </div>
-
-                              {/* Tab Body */}
-                              <div style={{ flex: 1, overflowY: 'auto', padding: 12 }}>
-                                {/* TAB 1: NOTES & RUBRIC */}
-                                {activeLiveTab === 'notes' && (
-                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10, height: '100%' }}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)' }}>Recommendation:</span>
-                                        <select
-                                          value={decision}
-                                          onChange={e => setDecision(e.target.value)}
-                                          className="form-select"
-                                          style={{ padding: '3px 8px', fontSize: 11, width: 'auto' }}
-                                        >
-                                          <option value="pending">Pending</option>
-                                          <option value="hire">Recommend Hire</option>
-                                          <option value="reject">Reject / Disqualify</option>
-                                          <option value="hold">Hold for Review</option>
-                                        </select>
-                                      </div>
-
-                                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                        <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)' }}>Score:</span>
-                                        <div style={{ display: 'flex', gap: 2 }}>
-                                          {[1, 2, 3, 4, 5].map(i => (
-                                            <button
-                                              key={i}
-                                              type="button"
-                                              onClick={() => setInterviewerRating(i)}
-                                              style={{ background: 'none', border: 'none', cursor: 'pointer', color: i <= interviewerRating ? '#f59e0b' : 'var(--text-muted)', padding: 1 }}
-                                            >
-                                              <Star size={13} fill={i <= interviewerRating ? 'currentColor' : 'none'} />
-                                            </button>
-                                          ))}
-                                        </div>
-                                      </div>
-                                    </div>
-
-                                    {/* Rubric Criteria Pills */}
-                                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
-                                      {[
-                                        { key: 'problemSolving', label: 'Problem Solving' },
-                                        { key: 'codeQuality', label: 'Code Quality' },
-                                        { key: 'architecture', label: 'Architecture' },
-                                        { key: 'communication', label: 'Communication' },
-                                      ].map(crit => (
-                                        <div key={crit.key} style={{ padding: '6px 8px', borderRadius: 6, background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column', gap: 2 }}>
-                                          <span style={{ fontSize: 10, color: 'var(--text-muted)' }} className="truncate">{crit.label}</span>
-                                          <select
-                                            value={rubricScores[crit.key] || 0}
-                                            onChange={e => setRubricScores(prev => ({ ...prev, [crit.key]: Number(e.target.value) }))}
-                                            className="form-select"
-                                            style={{ padding: '2px 4px', fontSize: 10 }}
-                                          >
-                                            <option value={0}>Rate...</option>
-                                            <option value={5}>5 - Exceptional</option>
-                                            <option value={4}>4 - Proficient</option>
-                                            <option value={3}>3 - Adequate</option>
-                                            <option value={2}>2 - Developing</option>
-                                            <option value={1}>1 - Unsatisfactory</option>
-                                          </select>
-                                        </div>
-                                      ))}
-                                    </div>
-
-                                    <textarea
-                                      value={interviewerNotes}
-                                      onChange={e => setInterviewerNotes(e.target.value)}
-                                      placeholder="Document candidate observations, technical strengths, edge case handling, communication clarity..."
-                                      className="form-textarea"
-                                      style={{ flex: 1, minHeight: 70, resize: 'none', fontSize: 12, lineHeight: 1.5 }}
-                                    />
-                                  </div>
-                                )}
-
-                                {/* TAB 2: PUSH LIVE QUESTION */}
-                                {activeLiveTab === 'question' && (
-                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                                    <div style={{ display: 'flex', gap: 6 }}>
-                                      <input
-                                        type="text"
-                                        placeholder="Question Title (e.g. Implement LRU Cache / Reverse Linked List)"
-                                        value={liveQuestionTitle}
-                                        onChange={e => setLiveQuestionTitle(e.target.value)}
-                                        className="form-input"
-                                        style={{ flex: 1, fontSize: 12 }}
-                                      />
-                                      <button
-                                        type="button"
-                                        onClick={() => setShowQuestionBankPicker(p => !p)}
-                                        className="btn btn-secondary btn-sm"
-                                        title="Pick from question bank"
-                                      >
-                                        <BookOpen size={12} />
-                                        <span>Bank</span>
-                                      </button>
-                                    </div>
-
-                                    {/* Question bank quick selector dropdown */}
-                                    {showQuestionBankPicker && (
-                                      <div style={{ maxHeight: 140, overflowY: 'auto', background: 'var(--bg-elevated)', border: '1px solid var(--border-medium)', borderRadius: 8, padding: 6, display: 'flex', flexDirection: 'column', gap: 4 }}>
-                                        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', padding: '2px 6px' }}>Select from Bank</div>
-                                        {questions.map(q => (
-                                          <div
-                                            key={q._id}
-                                            onClick={() => {
-                                              setLiveQuestionTitle(q.title);
-                                              setLiveQuestionDesc(q.description);
-                                              setLiveQuestionType(q.type || 'coding');
-                                              setLiveQuestionDifficulty(q.difficulty || 'medium');
-                                              setShowQuestionBankPicker(false);
-                                            }}
-                                            style={{ padding: '6px 8px', borderRadius: 6, background: 'var(--bg-card)', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
-                                          >
-                                            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-primary)' }}>{q.title}</span>
-                                            <span className={`diff-${q.difficulty}`} style={{ fontSize: 9 }}>{q.difficulty}</span>
-                                          </div>
-                                        ))}
-                                      </div>
-                                    )}
-
-                                    <textarea
-                                      value={liveQuestionDesc}
-                                      onChange={e => setLiveQuestionDesc(e.target.value)}
-                                      placeholder="Question description, constraints, and test scenarios. It will immediately pop up in the candidate's terminal screen..."
-                                      className="form-textarea"
-                                      style={{ minHeight: 60, resize: 'none', fontSize: 12 }}
-                                    />
-
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                      <div style={{ display: 'flex', gap: 6 }}>
-                                        <select
-                                          value={liveQuestionDifficulty}
-                                          onChange={e => setLiveQuestionDifficulty(e.target.value)}
-                                          className="form-select"
-                                          style={{ width: 'auto', fontSize: 11, padding: '3px 8px' }}
-                                        >
-                                          <option value="easy">Easy</option>
-                                          <option value="medium">Medium</option>
-                                          <option value="hard">Hard</option>
-                                        </select>
-                                      </div>
-                                      <button
-                                        onClick={() => handleSendLiveQuestion()}
-                                        disabled={isSendingQuestion || !liveQuestionTitle.trim()}
-                                        className="btn btn-primary btn-sm"
-                                      >
-                                        <Send size={12} />
-                                        <span>{isSendingQuestion ? 'Sending...' : 'Transmit to Candidate'}</span>
-                                      </button>
-                                    </div>
-                                  </div>
-                                )}
-
-                                {/* TAB 3: AI CO-PILOT */}
-                                {activeLiveTab === 'aiCopilot' && (
-                                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                      <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)' }}>
-                                        Intelligent Follow-Up Suggestions
-                                      </span>
-                                      <button
-                                        onClick={getAiFollowups}
-                                        disabled={isLoadingFollowups}
-                                        className="btn btn-primary btn-sm"
-                                      >
-                                        <Sparkles size={12} />
-                                        <span>{isLoadingFollowups ? 'Generating...' : 'Suggest Probing Questions'}</span>
-                                      </button>
-                                    </div>
-
-                                    {aiFollowups.length > 0 ? (
-                                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                                        {aiFollowups.map((f, i) => (
-                                          <div key={i} style={{ padding: '8px 10px', borderRadius: 6, background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)', fontSize: 12, color: 'var(--text-primary)', lineHeight: 1.4 }}>
-                                            <strong>{i + 1}.</strong> {f}
-                                          </div>
-                                        ))}
-                                      </div>
-                                    ) : (
-                                      <div style={{ textAlign: 'center', padding: '24px 10px', color: 'var(--text-muted)', fontSize: 12 }}>
-                                        Click "Suggest Probing Questions" to analyze the candidate's current code and generate technical follow-up questions with Gemini.
-                                      </div>
-                                    )}
-                                  </div>
-                                )}
-
-                                {/* TAB 4: CANDIDATE PROFILE */}
-                                {activeLiveTab === 'profile' && (
-                                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, fontSize: 12 }}>
-                                    <div style={{ padding: 8, background: 'var(--bg-elevated)', borderRadius: 6 }}>
-                                      <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Name</span>
-                                      <p style={{ margin: '2px 0 0', fontWeight: 600, color: 'var(--text-primary)' }}>{currentCandidate.fullname || currentCandidate.candidate_name}</p>
-                                    </div>
-                                    <div style={{ padding: 8, background: 'var(--bg-elevated)', borderRadius: 6 }}>
-                                      <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Email</span>
-                                      <p style={{ margin: '2px 0 0', color: 'var(--text-secondary)' }}>{currentCandidate.email || '—'}</p>
-                                    </div>
-                                    <div style={{ padding: 8, background: 'var(--bg-elevated)', borderRadius: 6 }}>
-                                      <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Target Role</span>
-                                      <p style={{ margin: '2px 0 0', fontWeight: 600, color: 'var(--text-primary)' }}>{currentCandidate.job_role || 'Software Engineer'}</p>
-                                    </div>
-                                    <div style={{ padding: 8, background: 'var(--bg-elevated)', borderRadius: 6 }}>
-                                      <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Room ID</span>
-                                      <p style={{ margin: '2px 0 0', fontFamily: 'JetBrains Mono', color: 'var(--text-secondary)' }}>{selectedInterview.id?.slice(-8)}</p>
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Right / Center Stage: Candidate Live Code Mirror */}
-                        {(monitorLayoutMode === 'split' || monitorLayoutMode === 'codeFocus') && (
-                          <div className="card" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
-                            {/* Editor Header Bar */}
-                            <div style={{ padding: '8px 14px', borderBottom: '1px solid var(--border-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--bg-surface)' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                <Terminal size={14} style={{ color: 'var(--primary)' }} />
-                                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>Candidate Code Stream</span>
-                                <span style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'JetBrains Mono' }}>
-                                  ({candidateLiveCode ? candidateLiveCode.split('\n').length : 0} lines)
-                                </span>
-                              </div>
-
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                <select
-                                  value={candidateLiveLang}
-                                  onChange={e => setCandidateLiveLang(e.target.value)}
-                                  className="form-select"
-                                  style={{ width: 'auto', padding: '3px 8px', fontSize: 11 }}
-                                >
-                                  <option value="javascript">JavaScript</option>
-                                  <option value="python">Python</option>
-                                  <option value="java">Java</option>
-                                  <option value="cpp">C++</option>
-                                  <option value="go">Go</option>
-                                </select>
-
-                                <button
-                                  onClick={runCode}
-                                  disabled={isRunningCode || !candidateLiveCode.trim()}
-                                  className="btn btn-success btn-sm"
-                                >
-                                  {isRunningCode ? <span className="spinner" style={{ width: 12, height: 12 }} /> : <Play size={11} />}
-                                  <span>{isRunningCode ? 'Running...' : 'Run Code'}</span>
-                                </button>
-                              </div>
-                            </div>
-
-                            {/* Code Area */}
-                            <div style={{ flex: 1, position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-                              <textarea
-                                readOnly
-                                value={candidateLiveCode || '// Waiting for candidate to type code in their terminal...'}
-                                className="form-textarea"
-                                style={{
-                                  flex: 1,
-                                  borderRadius: 0,
-                                  border: 'none',
-                                  background: '#040711',
-                                  color: '#cbd5e1',
-                                  fontFamily: "'JetBrains Mono', monospace",
-                                  fontSize: 12,
-                                  lineHeight: 1.7,
-                                  padding: 14,
-                                  resize: 'none'
-                                }}
-                              />
-
-                              {/* Code Execution Output */}
-                              {codeOutput !== null && (
-                                <div className={`code-output ${codeOutputError ? 'error' : ''}`}>
-                                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 10, color: 'var(--text-muted)' }}>
-                                    <span>OUTPUT CONSOLE</span>
-                                    <button onClick={() => setCodeOutput(null)} style={{ background: 'none', border: 'none', color: 'inherit', cursor: 'pointer' }}>Close</button>
-                                  </div>
-                                  {codeOutput}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        )}
-
-                        {/* 3. Proctoring Telemetry Sidebar */}
-                        {isProctorDrawerOpen && (
-                          <div style={{ width: 280, flexShrink: 0 }}>
-                            <AlertsPanel
-                              roomId={selectedInterview.id}
-                              onSendCandidateWarning={handleSendCandidateWarning}
-                            />
-                          </div>
-                        )}
-                      </div>
-                    </>
-                  );
-                })() : (
-                  <div className="card" style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 14, padding: 32 }}>
-                    <Activity size={48} style={{ color: 'var(--text-muted)', opacity: 0.4 }} />
-                    <div style={{ textAlign: 'center' }}>
-                      <h3 style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>Select a candidate to monitor</h3>
-                      <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '4px 0 0' }}>
-                        Live camera stream, real-time code synchronization, proctoring telemetry, and evaluation tools will activate here.
-                      </p>
-                    </div>
-                  </div>
-                )}
-              </div>
+            <div className="animate-fade-in" style={{ height: 'calc(100vh - 104px)', overflow: 'hidden' }}>
+              <LiveMonitoringView
+                candidates={allCandidates}
+                selectedCandidate={selectedInterview}
+                onSelectCandidate={(c) => {
+                  setSelectedInterview({
+                    id: c.interview_id || c.id,
+                    candidate_id: c.candidate_id || c.id,
+                    candidate_name: c.candidate_name || c.fullname,
+                    fullname: c.fullname || c.candidate_name,
+                    trust_score: c.trust_score,
+                    status: c.status,
+                    role: c.job_role || c.role
+                  });
+                }}
+                onActivateInterview={handleActivateInterview}
+                onTerminateInterview={handleTerminateFromMonitoring}
+                onSendWarning={handleSendProctorWarning}
+                onFlagIncident={handleFlagProctorIncident}
+                incidents={globalIncidents}
+                candidateLiveCode={candidateLiveCode}
+                codeOutput={codeOutput}
+                codeOutputError={codeOutputError}
+                isExecuting={isRunningCode}
+                handleRunCode={runCode}
+                runAiEvaluation={runAiEvaluation}
+                isEvaluating={isEvaluating}
+                aiFollowups={aiFollowups}
+                handleGetAiFollowup={getAiFollowups}
+                isGeneratingFollowup={isLoadingFollowups}
+                evaluationRubric={rubricScores}
+                setEvaluationRubric={setRubricScores}
+                interviewerNotes={interviewerNotes}
+                setInterviewerNotes={setInterviewerNotes}
+                interviewerRating={interviewerRating}
+                setInterviewerRating={setInterviewerRating}
+                onSaveRubric={saveNotes}
+                BACKEND={BACKEND}
+              />
             </div>
           )}
 

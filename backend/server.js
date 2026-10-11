@@ -521,6 +521,26 @@ app.get('/api/interviews/:id/logs', async (req, res) => {
     }
 });
 
+// Get all recent incidents across interviews for live monitoring audit drawer
+app.get('/api/incidents', async (req, res) => {
+    try {
+        const logs = await Log.find().sort({ timestamp: -1 }).limit(60);
+        res.json(logs.map(l => ({
+            id: l._id,
+            interviewId: String(l.interviewId),
+            roomId: String(l.interviewId),
+            candidateId: String(l.interviewId),
+            timestamp: l.timestamp,
+            event: l.anomalyType,
+            severity: l.severity,
+            confidence: l.confidence,
+            details: l.details
+        })));
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // Get interview details with questions
 app.get('/api/interviews/:id', async (req, res) => {
     try {
@@ -530,6 +550,87 @@ app.get('/api/interviews/:id', async (req, res) => {
             .populate('questions');
         if (!interview) return res.status(404).json({ error: 'Not found' });
         res.json(interview);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Post warning to candidate
+app.post('/api/interviews/:id/warning', async (req, res) => {
+    try {
+        const { message, warningType } = req.body;
+        const interview = await Interview.findById(req.params.id);
+        if (!interview) return res.status(404).json({ error: 'Interview not found' });
+
+        const log = await Log.create({
+            interviewId: interview._id,
+            anomalyType: warningType || 'PROCTOR_WARNING',
+            severity: 'medium',
+            confidence: 1.0,
+            details: message || 'Warning issued by proctor'
+        });
+
+        const alertData = {
+            roomId: String(interview._id),
+            event: 'PROCTOR_WARNING',
+            severity: 'medium',
+            details: message || 'Proctor warning issued',
+            message: message || 'Proctor warning issued',
+            timestamp: log.timestamp,
+            logId: log._id
+        };
+
+        if (typeof proctorNamespace !== 'undefined') {
+            proctorNamespace.to(String(interview._id)).emit('candidate_warning', alertData);
+            proctorNamespace.to(String(interview._id)).emit('proctor_alert', alertData);
+            proctorNamespace.emit('global_proctor_alert', alertData);
+        }
+
+        res.json({ success: true, log });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Flag incident manually
+app.post('/api/interviews/:id/incident', async (req, res) => {
+    try {
+        const { tag, severity = 'medium', details, penalty = 5 } = req.body;
+        const interview = await Interview.findById(req.params.id);
+        if (!interview) return res.status(404).json({ error: 'Interview not found' });
+
+        const log = await Log.create({
+            interviewId: interview._id,
+            anomalyType: tag || 'MANUAL_FLAG',
+            severity: severity,
+            confidence: 1.0,
+            details: details || `Manual incident flag: ${tag}`
+        });
+
+        const updatedScore = Math.max(0, (interview.trustScore || 100) - Number(penalty));
+        await Interview.findByIdAndUpdate(interview._id, { trustScore: updatedScore });
+
+        const alertData = {
+            roomId: String(interview._id),
+            event: tag || 'MANUAL_FLAG',
+            severity: severity,
+            confidence: 1.0,
+            details: details || `Flagged: ${tag}`,
+            timestamp: log.timestamp,
+            logId: log._id,
+            penalty
+        };
+
+        if (typeof proctorNamespace !== 'undefined') {
+            proctorNamespace.to(String(interview._id)).emit('proctor_alert', alertData);
+            proctorNamespace.to(String(interview._id)).emit('score_update', {
+                roomId: String(interview._id),
+                score: updatedScore
+            });
+            proctorNamespace.emit('global_proctor_alert', alertData);
+        }
+
+        res.json({ success: true, log, updatedScore });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -1232,9 +1333,93 @@ proctorNamespace.on('connection', (socket) => {
                 score: updatedInterview.trustScore
             });
 
+            // Global alert for interviewer monitoring feed
+            proctorNamespace.emit('global_proctor_alert', {
+                ...data, logId: newLog._id, timestamp: newLog.timestamp,
+                candidateId: interview.candidateId,
+                trustScore: updatedInterview.trustScore
+            });
+
             console.log(`[PROCTOR] Anomaly: ${data.event} (${data.severity}) — Trust: ${updatedInterview.trustScore}`);
         } catch (err) {
             console.error('[PROCTOR] Error processing anomaly:', err.message);
+        }
+    });
+
+    socket.on('send_warning', async (data) => {
+        try {
+            const { roomId, message, warningType } = data || {};
+            if (!roomId) return;
+            const interview = await Interview.findById(roomId);
+            if (!interview) return;
+
+            const newLog = await Log.create({
+                interviewId: interview._id,
+                anomalyType: warningType || 'PROCTOR_WARNING',
+                severity: 'medium',
+                confidence: 1.0,
+                details: message || 'Warning issued by proctor'
+            });
+
+            const alertData = {
+                roomId: String(roomId),
+                event: 'PROCTOR_WARNING',
+                severity: 'medium',
+                details: message || 'Proctor warning issued',
+                message: message || 'Proctor warning issued',
+                timestamp: newLog.timestamp,
+                logId: newLog._id,
+                candidateId: interview.candidateId
+            };
+
+            proctorNamespace.to(String(roomId)).emit('candidate_warning', alertData);
+            proctorNamespace.to(String(roomId)).emit('proctor_alert', alertData);
+            proctorNamespace.emit('global_proctor_alert', alertData);
+            console.log(`[PROCTOR] Warning sent to room ${roomId}: ${message}`);
+        } catch (err) {
+            console.error('[PROCTOR] Error in send_warning:', err.message);
+        }
+    });
+
+    socket.on('flag_incident', async (data) => {
+        try {
+            const { roomId, tag, severity = 'medium', details, penalty = 5 } = data || {};
+            if (!roomId) return;
+            const interview = await Interview.findById(roomId);
+            if (!interview) return;
+
+            const newLog = await Log.create({
+                interviewId: interview._id,
+                anomalyType: tag || 'MANUAL_FLAG',
+                severity,
+                confidence: 1.0,
+                details: details || `Manual incident flag: ${tag}`
+            });
+
+            const updatedScore = Math.max(0, (interview.trustScore || 100) - Number(penalty));
+            await Interview.findByIdAndUpdate(interview._id, { trustScore: updatedScore });
+
+            const alertData = {
+                roomId: String(roomId),
+                event: tag || 'MANUAL_FLAG',
+                severity,
+                details: details || `Flagged: ${tag}`,
+                timestamp: newLog.timestamp,
+                logId: newLog._id,
+                penalty,
+                candidateId: interview.candidateId,
+                trustScore: updatedScore
+            };
+
+            proctorNamespace.to(String(roomId)).emit('proctor_alert', alertData);
+            proctorNamespace.to(String(roomId)).emit('score_update', {
+                roomId: String(roomId),
+                score: updatedScore
+            });
+            proctorNamespace.emit('global_proctor_alert', alertData);
+            console.log(`[PROCTOR] Incident flagged in room ${roomId}: ${tag} (-${penalty})`);
+        } catch (err) {
+            console.error('[PROCTOR] Error in flag_incident:', err.message);
         }
     });
 
