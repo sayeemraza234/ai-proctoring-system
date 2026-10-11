@@ -2060,7 +2060,22 @@ export default function App() {
           {navItems.map(({ id, label, icon: Icon, badge }) => (
             <button
               key={id}
-              onClick={() => { setActiveSection(id); setIsProfileMenuOpen(false); }}
+              onClick={() => {
+                setActiveSection(id);
+                setIsProfileMenuOpen(false);
+                if (id === 'live' && !selectedInterview && allCandidates.length > 0) {
+                  const firstActive = allCandidates.find(c => c.status === 'active' || c.status === 'in_progress') || allCandidates[0];
+                  setSelectedInterview({
+                    id: firstActive.interview_id || firstActive.id,
+                    candidate_id: firstActive.candidate_id || firstActive.id,
+                    candidate_name: firstActive.candidate_name || firstActive.fullname,
+                    fullname: firstActive.fullname || firstActive.candidate_name,
+                    trust_score: firstActive.trust_score,
+                    status: firstActive.status,
+                    role: firstActive.job_role || firstActive.role
+                  });
+                }
+              }}
               className={`nav-item ${activeSection === id ? 'active' : ''}`}
               style={{ justifyContent: isSidebarCollapsed ? 'center' : 'flex-start', padding: isSidebarCollapsed ? '10px 0' : '8px 12px' }}
               title={label}

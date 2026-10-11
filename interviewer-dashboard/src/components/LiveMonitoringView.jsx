@@ -41,31 +41,11 @@ export default function LiveMonitoringView({
   onSaveRubric,
   BACKEND = ''
 }) {
-  // Layout state
-  const [viewMode, setViewMode] = useState('grid'); // 'grid' | 'focused'
-  const [layoutDensity, setLayoutDensity] = useState(() => {
-    try {
-      return localStorage.getItem('live_monitor_density') || 'standard';
-    } catch {
-      return 'standard';
-    }
-  });
-  const [stageCandidateId, setStageCandidateId] = useState(null);
+  // Layout state: Dedicated Full View Terminal
   const [quickExpandCandidate, setQuickExpandCandidate] = useState(null);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all'); // 'all' | 'active' | 'flagged' | 'scheduled'
   const [isIncidentDrawerOpen, setIsIncidentDrawerOpen] = useState(false);
   const [focusedLayoutMode, setFocusedLayoutMode] = useState('split'); // 'split' | 'videoFocus' | 'codeFocus'
   const [highlightedCandidateId, setHighlightedCandidateId] = useState(null);
-
-  const handleSetLayoutDensity = (density) => {
-    setLayoutDensity(density);
-    try {
-      localStorage.setItem('live_monitor_density', density);
-    } catch (e) {
-      console.warn('Failed to save layout density to localStorage', e);
-    }
-  };
 
   const handleRequestPiP = async (candidate) => {
     const candidateId = candidate.candidate_id || candidate.id;
@@ -105,30 +85,10 @@ export default function LiveMonitoringView({
   const [broadcastModalOpen, setBroadcastModalOpen] = useState(false);
   const [broadcastMessage, setBroadcastMessage] = useState('');
 
-  // Auto-switch to focused view if selectedCandidate is provided and user was on focused mode
+  // Auto-select active candidate for Full View terminal
   const currentFocusedCandidate = selectedCandidate
     ? candidates.find(c => (c.candidate_id || c.id) === (selectedCandidate.candidate_id || selectedCandidate.id)) || selectedCandidate
-    : null;
-
-  // Filter candidates for grid
-  const filteredCandidates = candidates.filter(c => {
-    const name = (c.candidate_name || c.fullname || '').toLowerCase();
-    const role = (c.job_role || c.role || '').toLowerCase();
-    const query = searchQuery.toLowerCase();
-
-    if (query && !name.includes(query) && !role.includes(query)) {
-      return false;
-    }
-
-    const isLive = c.status === 'active' || c.status === 'in_progress';
-    const isFlagged = c.isFlagged || (c.trust_score && c.trust_score < 70);
-
-    if (statusFilter === 'active' && !isLive) return false;
-    if (statusFilter === 'flagged' && !isFlagged) return false;
-    if (statusFilter === 'scheduled' && c.status !== 'scheduled') return false;
-
-    return true;
-  });
+    : (candidates && candidates.length > 0 ? candidates[0] : null);
 
   // Calculate live stats summary
   const totalMonitored = candidates.length;
@@ -138,10 +98,9 @@ export default function LiveMonitoringView({
     ? Math.round(candidates.reduce((acc, c) => acc + (c.trust_score ?? 100), 0) / candidates.length)
     : 100;
 
-  // Handle Inspect action
+  // Handle Select candidate
   const handleInspectCandidate = (candidate) => {
-    onSelectCandidate(candidate);
-    setViewMode('focused');
+    if (onSelectCandidate) onSelectCandidate(candidate);
   };
 
   // Handle warning presets
@@ -226,7 +185,10 @@ export default function LiveMonitoringView({
       }
       setTerminateModalCandidate(null);
       if (currentFocusedCandidate && (currentFocusedCandidate.candidate_id || currentFocusedCandidate.id) === (terminateModalCandidate.candidate_id || terminateModalCandidate.id)) {
-        setViewMode('grid');
+        const remaining = candidates.filter(c => (c.candidate_id || c.id) !== (terminateModalCandidate.candidate_id || terminateModalCandidate.id));
+        if (remaining.length > 0 && onSelectCandidate) {
+          onSelectCandidate(remaining[0]);
+        }
       }
     } catch (err) {
       console.error('Error terminating interview:', err);
@@ -305,73 +267,59 @@ export default function LiveMonitoringView({
 
           <div style={{ width: 1, height: 20, background: 'var(--border-subtle)', margin: '0 4px' }} />
 
-          {/* Single Compact View Mode Toggle: Grid vs. Focus */}
-          <div className="density-toggle-group">
-            <button
-              type="button"
-              onClick={() => setViewMode('grid')}
-              className={`density-btn ${viewMode === 'grid' ? 'active' : ''}`}
-              title="Multi-Feed Grid View"
-              aria-label="Grid View"
-            >
-              <LayoutGrid size={13} />
-              <span>Grid View</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                if (!currentFocusedCandidate && candidates.length > 0) {
-                  onSelectCandidate(candidates[0]);
-                }
-                setViewMode('focused');
-              }}
-              className={`density-btn ${viewMode === 'focused' ? 'active' : ''}`}
-              title="Single-Candidate Focus Mode"
-              aria-label="Focus View"
-            >
-              <Maximize2 size={13} />
-              <span>Focus View</span>
-            </button>
-          </div>
+          {/* Full View Mode Indicator & Candidate Selector */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '4px 10px',
+              background: 'rgba(99, 102, 241, 0.12)',
+              border: '1px solid rgba(99, 102, 241, 0.3)',
+              borderRadius: 8,
+              color: 'var(--primary)',
+              fontSize: 11,
+              fontWeight: 700
+            }}>
+              <Maximize2 size={12} />
+              <span>Full View Mode</span>
+            </div>
 
-          {/* Sizing / Density Controls (Active in Grid View) */}
-          {viewMode === 'grid' && (
-            <>
-              <div style={{ width: 1, height: 20, background: 'var(--border-subtle)', margin: '0 4px' }} />
-              <div className="density-toggle-group" title="Adjust grid layout sizing density">
-                <button
-                  type="button"
-                  onClick={() => handleSetLayoutDensity('compact')}
-                  className={`density-btn ${layoutDensity === 'compact' ? 'active' : ''}`}
-                  title="Compact: 3-4 cards per row (Dense surveillance)"
-                  aria-label="Compact Density"
+            {candidates.length > 0 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Candidate:</span>
+                <select
+                  value={currentFocusedCandidate ? (currentFocusedCandidate.candidate_id || currentFocusedCandidate.id) : ''}
+                  onChange={(e) => {
+                    const found = candidates.find(c => String(c.candidate_id || c.id) === String(e.target.value));
+                    if (found) onSelectCandidate(found);
+                  }}
+                  className="form-select"
+                  style={{
+                    height: 30,
+                    fontSize: 11,
+                    fontWeight: 600,
+                    minWidth: 160,
+                    background: 'var(--bg-elevated)',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: 8,
+                    color: 'var(--text-primary)'
+                  }}
+                  title="Switch Active Candidate"
                 >
-                  <LayoutGrid size={12} />
-                  <span>Compact</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleSetLayoutDensity('standard')}
-                  className={`density-btn ${layoutDensity === 'standard' ? 'active' : ''}`}
-                  title="Standard: 2 cards per row (Default balanced view)"
-                  aria-label="Standard Density"
-                >
-                  <Grid size={12} />
-                  <span>Standard</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleSetLayoutDensity('expanded')}
-                  className={`density-btn ${layoutDensity === 'expanded' ? 'active' : ''}`}
-                  title="Stage / Expanded: 1 primary card (75%) + thumbnail ribbon"
-                  aria-label="Stage Density"
-                >
-                  <Columns size={12} />
-                  <span>Stage</span>
-                </button>
+                  {candidates.map(c => {
+                    const cId = c.candidate_id || c.id;
+                    const isLive = c.status === 'active' || c.status === 'in_progress';
+                    return (
+                      <option key={cId} value={cId}>
+                        {c.candidate_name || c.fullname} ({isLive ? 'LIVE' : c.status})
+                      </option>
+                    );
+                  })}
+                </select>
               </div>
-            </>
-          )}
+            )}
+          </div>
         </div>
 
         {/* Right Edge: Theater / Fullscreen Toggle, Broadcast Notice, & Audit Feed Toggle */}
@@ -443,368 +391,43 @@ export default function LiveMonitoringView({
         </div>
       </header>
 
-      {/* ── BALANCED SUB-HEADER: SEARCH & STATUS PILLS (GRID VIEW) ─────────── */}
-      {viewMode === 'grid' && (
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 12,
-            padding: '8px 14px',
-            background: 'var(--bg-card)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: 10,
-            marginTop: 8,
-            flexShrink: 0
-          }}
-        >
-          {/* Search Input */}
-          <div style={{ position: 'relative', flex: 1, maxWidth: 380 }}>
-            <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-            <input
-              type="text"
-              placeholder="Search candidate by name or job role..."
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              className="form-input"
-              style={{ paddingLeft: 30, height: 30, fontSize: 11 }}
-            />
-            {searchQuery && (
-              <button
-                onClick={() => setSearchQuery('')}
-                style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 2 }}
-              >
-                <X size={12} />
-              </button>
-            )}
-          </div>
-
-          {/* Grouped Status Pills (All, Active, Flagged) & Avg Integrity */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div style={{ display: 'flex', gap: 3, background: 'var(--bg-elevated)', padding: 2, borderRadius: 8, border: '1px solid var(--border-subtle)' }}>
-              {[
-                { id: 'all', label: 'All', count: totalMonitored },
-                { id: 'active', label: 'Active', count: activeCount },
-                { id: 'flagged', label: 'Flagged', count: flaggedCount }
-              ].map(tab => (
-                <button
-                  key={tab.id}
-                  onClick={() => setStatusFilter(tab.id)}
-                  className="btn btn-ghost btn-sm"
-                  style={{
-                    fontSize: 11,
-                    padding: '3px 8px',
-                    borderRadius: 6,
-                    height: 24,
-                    background: statusFilter === tab.id ? 'var(--bg-card)' : 'transparent',
-                    color: statusFilter === tab.id ? 'var(--primary)' : 'var(--text-muted)',
-                    fontWeight: statusFilter === tab.id ? 700 : 500,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 5
-                  }}
-                >
-                  <span>{tab.label}</span>
-                  <span style={{
-                    fontSize: 9,
-                    padding: '0 4px',
-                    borderRadius: 9999,
-                    background: tab.id === 'flagged' && flaggedCount > 0 ? 'rgba(239, 68, 68, 0.2)' : 'var(--bg-surface)',
-                    color: tab.id === 'flagged' && flaggedCount > 0 ? '#ef4444' : 'inherit'
-                  }}>
-                    {tab.count}
-                  </span>
-                </button>
-              ))}
-            </div>
-
-            <span style={{ width: 1, height: 16, background: 'var(--border-subtle)' }} />
-
-            <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span>Avg Trust:</span>
-              <strong style={{ fontFamily: 'JetBrains Mono', color: avgTrust >= 80 ? '#10b981' : avgTrust >= 50 ? '#f59e0b' : '#ef4444' }}>
-                {avgTrust}%
-              </strong>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* ══════════════════════════════════════════════════════════════════════
-         WORKSPACE MAIN CONTENT AREA (GRID VIEW OR FOCUSED VIEW)
+         WORKSPACE MAIN CONTENT AREA: DEDICATED FULL VIEW TERMINAL
          ══════════════════════════════════════════════════════════════════════ */}
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative', marginTop: 8 }}>
+        <main
+          style={{
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 10,
+            padding: 12,
+            overflow: 'hidden'
+          }}
+          role="region"
+          aria-label="Full View Candidate Monitoring Terminal"
+        >
+          {currentFocusedCandidate ? (() => {
+            const isLive = currentFocusedCandidate.status === 'active' || currentFocusedCandidate.status === 'in_progress';
+            const trustScore = Math.round(currentFocusedCandidate.trust_score ?? 100);
+            const getTrustColor = (score) => score >= 80 ? 'var(--success)' : score >= 50 ? 'var(--warning)' : 'var(--danger)';
 
-        {/* ── VIEW MODE: MULTI-FEED GRID ──────────────────────────────────── */}
-        {viewMode === 'grid' && (
-          <main
-            className="live-grid-container"
-            style={{ flex: 1, overflowY: 'auto', padding: '6px 2px' }}
-            role="region"
-            aria-label="Multi-Candidate Live Feeds"
-          >
-            {filteredCandidates.length === 0 ? (
-              <div style={{
-                height: '100%',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 12,
-                color: 'var(--text-muted)'
-              }}>
-                <Users size={40} style={{ opacity: 0.3 }} />
-                <div style={{ textAlign: 'center' }}>
-                  <h3 style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>
-                    No Candidate Sessions Found
-                  </h3>
-                  <p style={{ fontSize: 12, margin: '4px 0 0' }}>
-                    {searchQuery || statusFilter !== 'all'
-                      ? 'Try clearing the search query or adjusting your status filters.'
-                      : 'Create or schedule candidate interviews to start live monitoring.'}
-                  </p>
-                </div>
-                {(searchQuery || statusFilter !== 'all') && (
-                  <button
-                    onClick={() => { setSearchQuery(''); setStatusFilter('all'); }}
-                    className="btn btn-secondary btn-sm"
-                  >
-                    Reset Filters
-                  </button>
-                )}
-              </div>
-            ) : (
-            ) : layoutDensity === 'expanded' ? (
-              <div className="stage-view-wrapper">
-                {/* 72% Center Stage Primary Candidate */}
-                {(() => {
-                  const activeStageCandidate = filteredCandidates.find(c =>
-                    (c.candidate_id || c.id) === (stageCandidateId || selectedCandidate?.candidate_id || selectedCandidate?.id)
-                  ) || filteredCandidates[0];
-
-                  if (!activeStageCandidate) return null;
-                  const stageId = activeStageCandidate.candidate_id || activeStageCandidate.id;
-                  const isSelected = (selectedCandidate?.candidate_id || selectedCandidate?.id) === stageId;
-                  const isHighlighted = highlightedCandidateId === stageId;
-
-                  return (
-                    <div style={{ flex: '1 1 72%', height: '100%', overflowY: 'auto' }}>
-                      <div
-                        id={`candidate-card-${stageId}`}
-                        style={{
-                          height: '100%',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          position: 'relative',
-                          transition: 'box-shadow 0.25s ease, transform 0.25s ease',
-                          ...(isHighlighted && {
-                            boxShadow: '0 0 0 3px #ef4444, 0 8px 24px rgba(239, 68, 68, 0.35)',
-                            borderRadius: 12,
-                            transform: 'scale(1.005)',
-                            zIndex: 5
-                          })
-                        }}
-                      >
-                        <CandidateCard
-                          candidate={activeStageCandidate}
-                          isSelected={isSelected}
-                          onInspect={handleInspectCandidate}
-                          onQuickExpand={(c) => setQuickExpandCandidate(c)}
-                          onPiP={handleRequestPiP}
-                          onIntervene={(c) => {
-                            setWarningModalCandidate(c);
-                            setWarningMessage(warningPresets[0]);
-                          }}
-                          onFlagIncident={(c) => {
-                            setFlagModalCandidate(c);
-                          }}
-                          onTerminate={(c) => {
-                            setTerminateModalCandidate(c);
-                          }}
-                          onActivate={onActivateInterview}
-                        />
-                      </div>
-                    </div>
-                  );
-                })()}
-
-                {/* 28% Side Thumbnail Ribbon */}
+            return (
+              <>
+                {/* Full View Candidate Header Bar */}
                 <div
-                  className="stage-thumbnail-ribbon"
+                  className="card"
                   style={{
-                    flex: '0 0 28%',
-                    maxWidth: 320,
-                    minWidth: 230,
-                    height: '100%',
-                    overflowY: 'auto'
+                    padding: '8px 14px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    borderRadius: 10,
+                    flexShrink: 0
                   }}
                 >
-                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span>Candidate Queue ({filteredCandidates.length})</span>
-                    <span style={{ fontSize: 10, fontWeight: 500, color: 'var(--text-muted)' }}>Click to feature</span>
-                  </div>
-
-                  {filteredCandidates.map(candidate => {
-                    const candidateId = candidate.candidate_id || candidate.id;
-                    const currentActiveStageId = stageCandidateId || selectedCandidate?.candidate_id || selectedCandidate?.id || filteredCandidates[0]?.candidate_id || filteredCandidates[0]?.id;
-                    const isCurrentStage = candidateId === currentActiveStageId;
-                    const isLive = candidate.status === 'active' || candidate.status === 'in_progress';
-                    const trustScore = Math.round(candidate.trust_score ?? 100);
-
-                    return (
-                      <div
-                        key={candidateId}
-                        onClick={() => {
-                          setStageCandidateId(candidateId);
-                          onSelectCandidate(candidate);
-                        }}
-                        className="stage-thumbnail-item card"
-                        style={{
-                          padding: '10px 12px',
-                          cursor: 'pointer',
-                          border: isCurrentStage ? '2px solid var(--primary)' : '1px solid var(--border-subtle)',
-                          background: isCurrentStage ? 'rgba(99, 102, 241, 0.08)' : 'var(--bg-card)',
-                          borderRadius: 10,
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: 6
-                        }}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                            <div style={{
-                              width: 26,
-                              height: 26,
-                              borderRadius: 6,
-                              background: isLive ? 'linear-gradient(135deg, #6366f1 0%, #4338ca 100%)' : 'var(--bg-elevated)',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              color: '#ffffff',
-                              fontSize: 10,
-                              fontWeight: 700,
-                              flexShrink: 0
-                            }}>
-                              {(candidate.candidate_name || candidate.fullname || 'C')[0].toUpperCase()}
-                            </div>
-                            <div style={{ minWidth: 0 }}>
-                              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.2 }} className="truncate">
-                                {candidate.candidate_name || candidate.fullname}
-                              </div>
-                              <div style={{ fontSize: 10, color: 'var(--text-muted)' }} className="truncate">
-                                {candidate.job_role || 'Software Engineer'}
-                              </div>
-                            </div>
-                          </div>
-                          <span className={`badge ${isLive ? 'badge-active' : 'badge-scheduled'}`} style={{ fontSize: 8, padding: '1px 5px' }}>
-                            {isLive ? 'LIVE' : candidate.status}
-                          </span>
-                        </div>
-
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 10, color: 'var(--text-muted)', paddingTop: 4, borderTop: '1px solid var(--border-subtle)' }}>
-                          <span>Trust: <strong style={{ color: trustScore >= 80 ? 'var(--success)' : trustScore >= 50 ? 'var(--warning)' : 'var(--danger)' }}>{trustScore}%</strong></span>
-                          {isCurrentStage && (
-                            <span style={{ color: 'var(--primary)', fontWeight: 700 }}>Featured</span>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            ) : (
-              <div className={`live-grid ${layoutDensity === 'compact' ? 'density-compact' : 'density-standard'}`}>
-                {filteredCandidates.map(candidate => {
-                  const candidateId = candidate.candidate_id || candidate.id;
-                  const isSelected = (selectedCandidate?.candidate_id || selectedCandidate?.id) === candidateId;
-                  const isHighlighted = highlightedCandidateId === candidateId;
-
-                  return (
-                    <div
-                      key={candidateId}
-                      id={`candidate-card-${candidateId}`}
-                      style={{
-                        position: 'relative',
-                        transition: 'box-shadow 0.25s ease, transform 0.25s ease',
-                        ...(isHighlighted && {
-                          boxShadow: '0 0 0 3px #ef4444, 0 8px 24px rgba(239, 68, 68, 0.35)',
-                          borderRadius: 12,
-                          transform: 'scale(1.01)',
-                          zIndex: 5
-                        })
-                      }}
-                    >
-                      <CandidateCard
-                        candidate={candidate}
-                        isSelected={isSelected}
-                        onInspect={handleInspectCandidate}
-                        onQuickExpand={(c) => setQuickExpandCandidate(c)}
-                        onPiP={handleRequestPiP}
-                        onIntervene={(c) => {
-                          setWarningModalCandidate(c);
-                          setWarningMessage(warningPresets[0]);
-                        }}
-                        onFlagIncident={(c) => {
-                          setFlagModalCandidate(c);
-                        }}
-                        onTerminate={(c) => {
-                          setTerminateModalCandidate(c);
-                        }}
-                        onActivate={onActivateInterview}
-                      />
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </main>
-        )}
-
-        {/* ── VIEW MODE: FOCUSED SINGLE-CANDIDATE VIEW ───────────────────── */}
-        {viewMode === 'focused' && (
-          <main
-            style={{
-              flex: 1,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 10,
-              padding: 12,
-              overflow: 'hidden'
-            }}
-            role="region"
-            aria-label="Focused Candidate Deep Dive"
-          >
-            {currentFocusedCandidate ? (() => {
-              const isLive = currentFocusedCandidate.status === 'active' || currentFocusedCandidate.status === 'in_progress';
-              const trustScore = Math.round(currentFocusedCandidate.trust_score ?? 100);
-              const getTrustColor = (score) => score >= 80 ? 'var(--success)' : score >= 50 ? 'var(--warning)' : 'var(--danger)';
-
-              return (
-                <>
-                  {/* Focused Candidate Header Bar */}
-                  <div
-                    className="card"
-                    style={{
-                      padding: '8px 14px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      borderRadius: 10,
-                      flexShrink: 0
-                    }}
-                  >
-                    {/* Candidate Identity & Back to Grid */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-                      <button
-                        onClick={() => setViewMode('grid')}
-                        className="btn btn-secondary btn-sm"
-                        style={{ padding: '4px 10px', fontSize: 11 }}
-                        title="Return to multi-candidate grid overview"
-                      >
-                        <ChevronRight size={13} style={{ transform: 'rotate(180deg)' }} />
-                        <span>All Feeds</span>
-                      </button>
+                  {/* Candidate Identity */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
 
                       <div style={{
                         width: 34,
@@ -1098,22 +721,15 @@ export default function LiveMonitoringView({
                 <Users size={48} style={{ color: 'var(--text-muted)', opacity: 0.4 }} />
                 <div style={{ textAlign: 'center' }}>
                   <h3 style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>
-                    Select a Candidate Feed
+                    No Candidate Selected
                   </h3>
                   <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '4px 0 0' }}>
-                    Choose any candidate card from the Grid View to inspect high-fidelity telemetry, synchronized code, and 2-way stream.
+                    Select a candidate from the top selector or Candidates tab to open their full-view monitoring terminal.
                   </p>
                 </div>
-                <button
-                  onClick={() => setViewMode('grid')}
-                  className="btn btn-primary btn-sm"
-                >
-                  Return to Grid View
-                </button>
               </div>
             )}
           </main>
-        )}
 
         {/* ── COLLAPSIBLE INCIDENT & AUDIT FEED DRAWER ─────────────────────── */}
         <IncidentDrawer
