@@ -2123,37 +2123,56 @@ export default function App() {
 
           {/* Global Actions Right */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            {/* Gemini AI Status Badge (Secure Server-Side Masking) */}
+            {/* Discreet AI Engine Status Pill / Tooltip */}
             {aiStatus && (
-              <div
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  padding: '5px 11px',
-                  borderRadius: 9999,
-                  fontSize: 11,
-                  fontFamily: "'JetBrains Mono', monospace",
-                  border: '1px solid var(--border-medium)',
-                  background: 'var(--bg-card)',
-                  color: 'var(--text-secondary)'
-                }}
-                title={aiStatus.configured ? `Gemini AI (${aiStatus.model}) connected` : 'Gemini API Key missing in backend/.env'}
-              >
-                <span
+              aiStatus.configured ? (
+                <div
                   style={{
-                    width: 6,
-                    height: 6,
-                    borderRadius: '50%',
-                    backgroundColor: aiStatus.configured ? '#10b981' : '#f59e0b',
-                    boxShadow: aiStatus.configured ? '0 0 6px rgba(16, 185, 129, 0.5)' : 'none'
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '4px 10px',
+                    borderRadius: 9999,
+                    fontSize: 11,
+                    fontFamily: "'JetBrains Mono', monospace",
+                    border: '1px solid var(--border-medium)',
+                    background: 'var(--bg-card)',
+                    color: 'var(--text-secondary)'
                   }}
-                />
-                <span style={{ fontWeight: 600 }}>Gemini:</span>
-                <span style={{ color: aiStatus.configured ? 'var(--text-primary)' : 'var(--text-muted)' }}>
-                  {aiStatus.configured ? (aiStatus.maskedKey || 'Active') : 'Not Configured'}
-                </span>
-              </div>
+                  title={`Google Gemini AI connected (${aiStatus.model || '2.5 Flash'})`}
+                >
+                  <span
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: '50%',
+                      backgroundColor: '#10b981',
+                      boxShadow: '0 0 6px rgba(16, 185, 129, 0.6)'
+                    }}
+                  />
+                  <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>Gemini</span>
+                  <span style={{ color: 'var(--text-muted)' }}>Live</span>
+                </div>
+              ) : (
+                <div
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '4px 9px',
+                    borderRadius: 9999,
+                    fontSize: 11,
+                    border: '1px solid var(--border-subtle)',
+                    background: 'var(--bg-card)',
+                    color: 'var(--text-muted)',
+                    cursor: 'help'
+                  }}
+                  title="Smart Technical Synthesis Engine Active (Zero Setup / Offline Mode). Optional: configure GEMINI_API_KEY in Render or Vercel for live Gemini 2.5 Flash."
+                >
+                  <Cpu size={12} style={{ color: 'var(--primary)' }} />
+                  <span style={{ fontSize: 10, fontWeight: 500, color: 'var(--text-muted)' }}>Smart Engine</span>
+                </div>
+              )
             )}
 
             {/* Segmented Two-Theme Switcher (White & Black) */}

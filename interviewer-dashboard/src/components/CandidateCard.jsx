@@ -95,15 +95,11 @@ export default function CandidateCard({
                 {candidate.candidate_name || candidate.fullname}
               </h3>
               <span className={`badge ${isLive ? 'badge-active' : candidate.status === 'scheduled' ? 'badge-scheduled' : 'badge-completed'}`} style={{ fontSize: 9, padding: '1px 6px' }}>
-                {isLive ? 'LIVE' : candidate.status}
+                {isLive ? 'Live' : candidate.status}
               </span>
             </div>
-            <div style={{ fontSize: 10, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4, marginTop: 2 }}>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
               <span>{candidate.job_role || 'Software Engineer'}</span>
-              <span>•</span>
-              <span style={{ fontFamily: 'JetBrains Mono', fontSize: 9 }}>
-                #{String(candidate.interview_id || candidate.id || '').slice(-6)}
-              </span>
             </div>
           </div>
         </div>
@@ -171,10 +167,10 @@ export default function CandidateCard({
         />
       </div>
 
-      {/* ── ACCESSIBLE ACTION TOOLBAR ─────────────────────────────────── */}
+      {/* ── STANDARDIZED ACTION TOOLBAR ─────────────────────────────────── */}
       <div style={{
         marginTop: 'auto',
-        padding: '8px 14px',
+        padding: '8px 12px',
         borderTop: '1px solid var(--border-subtle)',
         background: 'var(--bg-surface)',
         display: 'flex',
@@ -182,35 +178,37 @@ export default function CandidateCard({
         justifyContent: 'space-between',
         gap: 6
       }}>
+        {/* Primary Inspect CTA */}
         <button
           type="button"
           onClick={() => onInspect && onInspect(candidate)}
           className="btn btn-primary btn-sm"
-          style={{ flex: 1, padding: '5px 10px', fontSize: 11 }}
+          style={{ flex: 1, padding: '5px 12px', fontSize: 11, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}
           title="Inspect stream, synchronized code, and telemetry in focused view"
         >
           <Maximize2 size={12} />
           <span>Inspect</span>
         </button>
 
+        {/* Compact Icon Buttons: Warn, Flag, Terminate */}
         <button
           type="button"
           onClick={() => onIntervene && onIntervene(candidate)}
-          className="btn btn-secondary btn-sm"
-          style={{ padding: '5px 10px', fontSize: 11 }}
-          title="Send real-time warning alert to candidate"
+          className="btn btn-secondary btn-icon btn-sm"
+          title="Send warning message to candidate"
+          aria-label="Send warning message"
         >
-          <MessageSquare size={12} />
-          <span>Warn</span>
+          <MessageSquare size={13} />
         </button>
 
         <button
           type="button"
           onClick={() => onFlagIncident && onFlagIncident(candidate)}
           className="btn btn-secondary btn-icon btn-sm"
-          title="Manually flag proctoring incident"
+          title="Flag proctoring incident"
+          aria-label="Flag incident"
         >
-          <Flag size={12} />
+          <Flag size={13} />
         </button>
 
         {isLive && (
@@ -219,8 +217,9 @@ export default function CandidateCard({
             onClick={() => onTerminate && onTerminate(candidate)}
             className="btn btn-danger-outline btn-icon btn-sm"
             title="Terminate candidate session"
+            aria-label="Terminate session"
           >
-            <PhoneOff size={12} />
+            <PhoneOff size={13} />
           </button>
         )}
 
@@ -230,8 +229,9 @@ export default function CandidateCard({
             onClick={() => onActivate(candidate.interview_id || candidate.id)}
             className="btn btn-success btn-icon btn-sm"
             title="Activate scheduled exam"
+            aria-label="Activate exam"
           >
-            <Play size={12} />
+            <Play size={13} />
           </button>
         )}
       </div>

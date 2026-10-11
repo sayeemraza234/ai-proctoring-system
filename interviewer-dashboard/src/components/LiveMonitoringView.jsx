@@ -40,10 +40,9 @@ export default function LiveMonitoringView({
 }) {
   // Layout state
   const [viewMode, setViewMode] = useState('grid'); // 'grid' | 'focused'
-  const [gridDensity, setGridDensity] = useState('2x2'); // '2x2' | '3x3' | 'fit'
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all'); // 'all' | 'active' | 'flagged' | 'scheduled'
-  const [isIncidentDrawerOpen, setIsIncidentDrawerOpen] = useState(true);
+  const [isIncidentDrawerOpen, setIsIncidentDrawerOpen] = useState(false);
   const [focusedLayoutMode, setFocusedLayoutMode] = useState('split'); // 'split' | 'videoFocus' | 'codeFocus'
   const [highlightedCandidateId, setHighlightedCandidateId] = useState(null);
 
@@ -239,7 +238,7 @@ export default function LiveMonitoringView({
          TOP ACTION & CONTROL BAR
          ══════════════════════════════════════════════════════════════════════ */}
       <header className="live-top-bar" role="toolbar" aria-label="Live Monitoring Toolbar">
-        {/* Left Side: Title & View Mode Switcher */}
+        {/* Left Side: Title & Compact View Mode Toggle */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <div style={{
@@ -260,14 +259,14 @@ export default function LiveMonitoringView({
                 Live Proctoring Control
               </h1>
               <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
-                Multi-feed telemetry & real-time surveillance
+                Multi-feed telemetry & surveillance
               </span>
             </div>
           </div>
 
           <div style={{ width: 1, height: 20, background: 'var(--border-subtle)', margin: '0 4px' }} />
 
-          {/* View Mode Toggle: Grid vs. Focused */}
+          {/* Single Compact View Mode Toggle: Grid vs. Focus */}
           <div className="density-toggle-group">
             <button
               type="button"
@@ -288,151 +287,42 @@ export default function LiveMonitoringView({
                 setViewMode('focused');
               }}
               className={`density-btn ${viewMode === 'focused' ? 'active' : ''}`}
-              title="Single-Candidate Focused Deep-Dive"
-              aria-label="Focused View"
+              title="Single-Candidate Focus Mode"
+              aria-label="Focus View"
             >
               <Maximize2 size={13} />
-              <span>Focused View</span>
+              <span>Focus View</span>
             </button>
           </div>
-
-          {/* Grid Density Switcher (Only visible in Grid View) */}
-          {viewMode === 'grid' && (
-            <div className="density-toggle-group">
-              <button
-                type="button"
-                onClick={() => setGridDensity('2x2')}
-                className={`density-btn ${gridDensity === '2x2' ? 'active' : ''}`}
-                title="2×2 Grid Layout"
-              >
-                2×2
-              </button>
-              <button
-                type="button"
-                onClick={() => setGridDensity('3x3')}
-                className={`density-btn ${gridDensity === '3x3' ? 'active' : ''}`}
-                title="3×3 Grid Layout"
-              >
-                3×3
-              </button>
-              <button
-                type="button"
-                onClick={() => setGridDensity('fit')}
-                className={`density-btn ${gridDensity === 'fit' ? 'active' : ''}`}
-                title="Adaptive Fit Density"
-              >
-                Fit All
-              </button>
-            </div>
-          )}
         </div>
 
-        {/* Center / Search & Filters */}
-        {viewMode === 'grid' && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1, maxWidth: 460, margin: '0 16px' }}>
-            <div style={{ position: 'relative', flex: 1 }}>
-              <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-              <input
-                type="text"
-                placeholder="Search candidates by name or role..."
-                value={searchQuery}
-                onChange={e => setSearchQuery(e.target.value)}
-                className="form-input"
-                style={{ paddingLeft: 30, height: 32, fontSize: 11 }}
-              />
-              {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery('')}
-                  style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 2 }}
-                >
-                  <X size={12} />
-                </button>
-              )}
-            </div>
-
-            {/* Filter Pills */}
-            <div style={{ display: 'flex', gap: 4, background: 'var(--bg-elevated)', padding: 2, borderRadius: 8, border: '1px solid var(--border-subtle)' }}>
-              {[
-                { id: 'all', label: 'All' },
-                { id: 'active', label: 'Active', count: activeCount },
-                { id: 'flagged', label: 'Flagged', count: flaggedCount }
-              ].map(tab => (
-                <button
-                  key={tab.id}
-                  onClick={() => setStatusFilter(tab.id)}
-                  className="btn btn-ghost btn-sm"
-                  style={{
-                    fontSize: 10,
-                    padding: '2px 8px',
-                    borderRadius: 6,
-                    height: 24,
-                    background: statusFilter === tab.id ? 'var(--bg-card)' : 'transparent',
-                    color: statusFilter === tab.id ? 'var(--primary)' : 'var(--text-muted)',
-                    fontWeight: statusFilter === tab.id ? 700 : 500
-                  }}
-                >
-                  <span>{tab.label}</span>
-                  {tab.count !== undefined && (
-                    <span style={{
-                      fontSize: 9,
-                      padding: '0 4px',
-                      borderRadius: 9999,
-                      background: tab.id === 'flagged' && flaggedCount > 0 ? 'rgba(239, 68, 68, 0.2)' : 'var(--bg-surface)',
-                      color: tab.id === 'flagged' && flaggedCount > 0 ? '#ef4444' : 'inherit'
-                    }}>
-                      {tab.count}
-                    </span>
-                  )}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Right Side: Global Batch Actions & Drawer Toggle */}
+        {/* Right Edge: Quick Telemetry, Broadcast Notice, & Audit Feed Toggle */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto' }}>
-          {/* Quick Metrics Badge */}
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 10,
-            background: 'var(--bg-surface)',
-            border: '1px solid var(--border-subtle)',
-            padding: '3px 10px',
-            borderRadius: 8,
-            fontSize: 11
-          }}>
-            <span style={{ color: 'var(--text-muted)' }}>
-              Live: <strong style={{ color: '#10b981' }}>{activeCount}</strong>/{totalMonitored}
-            </span>
-            <span style={{ width: 1, height: 12, background: 'var(--border-subtle)' }} />
-            <span style={{ color: 'var(--text-muted)' }}>
-              Avg Trust: <strong style={{ color: avgTrust >= 80 ? '#10b981' : avgTrust >= 50 ? '#f59e0b' : '#ef4444' }}>{avgTrust}%</strong>
-            </span>
-          </div>
-
-          {/* Broadcast Notice CTA */}
+          {/* Broadcast Notice Button */}
           <button
             type="button"
             onClick={() => setBroadcastModalOpen(true)}
             disabled={activeCount === 0}
             className="btn btn-secondary btn-sm"
             title="Broadcast a real-time warning to all active candidate sessions"
-            style={{ height: 32 }}
+            style={{ height: 32, display: 'flex', alignItems: 'center', gap: 6 }}
           >
-            <MessageSquare size={12} />
+            <MessageSquare size={13} />
             <span>Broadcast Notice</span>
           </button>
 
-          {/* Incident Drawer Toggle */}
+          {/* Audit Feed Drawer Toggle */}
           <button
             type="button"
             onClick={() => setIsIncidentDrawerOpen(o => !o)}
             className="btn btn-secondary btn-sm"
             style={{
               height: 32,
-              background: isIncidentDrawerOpen ? 'rgba(99, 102, 241, 0.12)' : 'transparent',
-              borderColor: isIncidentDrawerOpen ? 'rgba(99, 102, 241, 0.35)' : 'var(--border-subtle)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              background: isIncidentDrawerOpen ? 'rgba(99, 102, 241, 0.12)' : 'var(--bg-elevated)',
+              borderColor: isIncidentDrawerOpen ? 'rgba(99, 102, 241, 0.4)' : 'var(--border-subtle)',
               color: isIncidentDrawerOpen ? 'var(--primary)' : 'var(--text-secondary)'
             }}
             title="Toggle Live Activity Audit Feed"
@@ -455,16 +345,104 @@ export default function LiveMonitoringView({
         </div>
       </header>
 
+      {/* ── BALANCED SUB-HEADER: SEARCH & STATUS PILLS (GRID VIEW) ─────────── */}
+      {viewMode === 'grid' && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+            padding: '8px 14px',
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 10,
+            marginTop: 8,
+            flexShrink: 0
+          }}
+        >
+          {/* Search Input */}
+          <div style={{ position: 'relative', flex: 1, maxWidth: 380 }}>
+            <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+            <input
+              type="text"
+              placeholder="Search candidate by name or job role..."
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              className="form-input"
+              style={{ paddingLeft: 30, height: 30, fontSize: 11 }}
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: 2 }}
+              >
+                <X size={12} />
+              </button>
+            )}
+          </div>
+
+          {/* Grouped Status Pills (All, Active, Flagged) & Avg Integrity */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ display: 'flex', gap: 3, background: 'var(--bg-elevated)', padding: 2, borderRadius: 8, border: '1px solid var(--border-subtle)' }}>
+              {[
+                { id: 'all', label: 'All', count: totalMonitored },
+                { id: 'active', label: 'Active', count: activeCount },
+                { id: 'flagged', label: 'Flagged', count: flaggedCount }
+              ].map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => setStatusFilter(tab.id)}
+                  className="btn btn-ghost btn-sm"
+                  style={{
+                    fontSize: 11,
+                    padding: '3px 8px',
+                    borderRadius: 6,
+                    height: 24,
+                    background: statusFilter === tab.id ? 'var(--bg-card)' : 'transparent',
+                    color: statusFilter === tab.id ? 'var(--primary)' : 'var(--text-muted)',
+                    fontWeight: statusFilter === tab.id ? 700 : 500,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 5
+                  }}
+                >
+                  <span>{tab.label}</span>
+                  <span style={{
+                    fontSize: 9,
+                    padding: '0 4px',
+                    borderRadius: 9999,
+                    background: tab.id === 'flagged' && flaggedCount > 0 ? 'rgba(239, 68, 68, 0.2)' : 'var(--bg-surface)',
+                    color: tab.id === 'flagged' && flaggedCount > 0 ? '#ef4444' : 'inherit'
+                  }}>
+                    {tab.count}
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            <span style={{ width: 1, height: 16, background: 'var(--border-subtle)' }} />
+
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span>Avg Trust:</span>
+              <strong style={{ fontFamily: 'JetBrains Mono', color: avgTrust >= 80 ? '#10b981' : avgTrust >= 50 ? '#f59e0b' : '#ef4444' }}>
+                {avgTrust}%
+              </strong>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ══════════════════════════════════════════════════════════════════════
          WORKSPACE MAIN CONTENT AREA (GRID VIEW OR FOCUSED VIEW)
          ══════════════════════════════════════════════════════════════════════ */}
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative' }}>
+      <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative', marginTop: 8 }}>
 
         {/* ── VIEW MODE: MULTI-FEED GRID ──────────────────────────────────── */}
         {viewMode === 'grid' && (
           <main
             className="live-grid-container"
-            style={{ flex: 1, overflowY: 'auto', padding: 14 }}
+            style={{ flex: 1, overflowY: 'auto', padding: '6px 2px' }}
             role="region"
             aria-label="Multi-Candidate Live Feeds"
           >
@@ -499,7 +477,7 @@ export default function LiveMonitoringView({
                 )}
               </div>
             ) : (
-              <div className={`live-grid density-${gridDensity}`}>
+              <div className="live-grid">
                 {filteredCandidates.map(candidate => {
                   const candidateId = candidate.candidate_id || candidate.id;
                   const isSelected = (selectedCandidate?.candidate_id || selectedCandidate?.id) === candidateId;

@@ -46,6 +46,36 @@ export default function IncidentDrawer({
     return isNaN(d.getTime()) ? 'Just now' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   };
 
+  const formatEventTitle = (raw) => {
+    if (!raw) return 'Telemetry Event';
+    const rawClean = String(raw).trim();
+    const map = {
+      window_switch_attempt: 'Window Switch Attempt',
+      window_switch: 'Window Switch Attempt',
+      tab_switch_detected: 'Tab Switch Attempt',
+      tab_switch: 'Tab Switch Attempt',
+      tab_switches: 'Tab Switch Attempt',
+      face_absent: 'Face Absent from Frame',
+      no_face: 'Face Absent from Frame',
+      face_not_found: 'Face Absent from Frame',
+      multiple_faces: 'Multiple Faces in Frame',
+      multi_face: 'Multiple Faces in Frame',
+      speech_detected: 'Voice / Speech Detected',
+      audio_detected: 'Acoustic Anomaly Flagged',
+      suspicious_audio: 'Whisper / Speech Pattern',
+      secondary_device: 'Unauthorized Secondary Device',
+      phone_detected: 'Smartphone Detected in Frame',
+      gaze_away: 'Prolonged Gaze Diversion',
+      screen_share_lost: 'Screen Share Lost',
+      device_disconnected: 'Device Disconnected'
+    };
+    const key = rawClean.toLowerCase().replace(/[\s-]+/g, '_');
+    if (map[key]) return map[key];
+    return rawClean
+      .replace(/[_-]+/g, ' ')
+      .replace(/\b\w/g, c => c.toUpperCase());
+  };
+
   return (
     <aside className="incident-drawer-panel" role="complementary" aria-label="Live Activity Audit Feed">
       {/* ── DRAWER HEADER ──────────────────────────────────────────────── */}
@@ -164,6 +194,7 @@ export default function IncidentDrawer({
 
             const Icon = isCritical ? AlertTriangle : isWarning ? AlertCircle : Info;
             const iconColor = isCritical ? 'var(--danger)' : isWarning ? 'var(--warning)' : 'var(--info)';
+            const badgeLabel = isCritical ? 'Critical' : isWarning ? 'Warning' : 'Notice';
 
             return (
               <div
@@ -173,10 +204,26 @@ export default function IncidentDrawer({
                 title="Click to focus on candidate card"
               >
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: 1 }}>
                     <Icon size={13} style={{ color: iconColor, flexShrink: 0 }} />
                     <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }} className="truncate">
-                      {item.event || item.anomalyType || 'Telemetry Event'}
+                      {formatEventTitle(item.event || item.anomalyType)}
+                    </span>
+                    <span
+                      style={{
+                        fontSize: 9,
+                        fontWeight: 700,
+                        padding: '1px 5px',
+                        borderRadius: 4,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.04em',
+                        flexShrink: 0,
+                        background: isCritical ? 'rgba(239, 68, 68, 0.15)' : isWarning ? 'rgba(245, 158, 11, 0.15)' : 'rgba(99, 102, 241, 0.15)',
+                        color: isCritical ? '#ef4444' : isWarning ? '#f59e0b' : 'var(--primary)',
+                        border: `1px solid ${isCritical ? 'rgba(239, 68, 68, 0.3)' : isWarning ? 'rgba(245, 158, 11, 0.3)' : 'rgba(99, 102, 241, 0.3)'}`
+                      }}
+                    >
+                      {badgeLabel}
                     </span>
                   </div>
                   <span style={{ fontSize: 10, color: 'var(--text-muted)', fontFamily: 'JetBrains Mono', flexShrink: 0 }}>
@@ -185,14 +232,14 @@ export default function IncidentDrawer({
                 </div>
 
                 {item.candidateName && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: 'var(--primary)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10, color: 'var(--primary)', marginTop: 2 }}>
                     <User size={10} />
                     <span style={{ fontWeight: 600 }}>{item.candidateName}</span>
                   </div>
                 )}
 
                 {item.details && (
-                  <p style={{ fontSize: 11, color: 'var(--text-secondary)', margin: '2px 0 0', lineHeight: 1.4 }}>
+                  <p style={{ fontSize: 11, color: 'var(--text-secondary)', margin: '3px 0 0', lineHeight: 1.4 }}>
                     {item.details}
                   </p>
                 )}

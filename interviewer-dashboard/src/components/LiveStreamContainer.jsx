@@ -45,61 +45,79 @@ export default function LiveStreamContainer({
       }}
     >
       {/* ── TOP-LEFT STATUS BADGE ────────────────────────────────────────── */}
-      <div className="stream-overlay-badge stream-badge-top-left" style={{ zIndex: 10 }}>
-        {isLive ? (
-          <>
+      {compact ? (
+        isLive && (
+          <div className="stream-overlay-badge stream-badge-top-left" style={{ zIndex: 10, padding: '2px 6px' }}>
             <span style={{
-              width: 7,
-              height: 7,
+              width: 6,
+              height: 6,
               borderRadius: '50%',
               background: '#10b981',
-              boxShadow: '0 0 8px #10b981'
+              boxShadow: '0 0 6px #10b981'
             }} />
-            <span style={{ fontWeight: 700, letterSpacing: '0.04em' }}>
-              LIVE HD · 30fps
-            </span>
-          </>
-        ) : (
-          <>
-            <span style={{
-              width: 7,
-              height: 7,
-              borderRadius: '50%',
-              background: 'var(--text-muted)'
-            }} />
-            <span style={{ fontWeight: 600 }}>STANDBY</span>
-          </>
-        )}
-      </div>
+            <span style={{ fontWeight: 700, fontSize: 9, letterSpacing: '0.05em' }}>LIVE</span>
+          </div>
+        )
+      ) : (
+        <div className="stream-overlay-badge stream-badge-top-left" style={{ zIndex: 10 }}>
+          {isLive ? (
+            <>
+              <span style={{
+                width: 7,
+                height: 7,
+                borderRadius: '50%',
+                background: '#10b981',
+                boxShadow: '0 0 8px #10b981'
+              }} />
+              <span style={{ fontWeight: 700, letterSpacing: '0.04em' }}>
+                LIVE HD · 30fps
+              </span>
+            </>
+          ) : (
+            <>
+              <span style={{
+                width: 7,
+                height: 7,
+                borderRadius: '50%',
+                background: 'var(--text-muted)'
+              }} />
+              <span style={{ fontWeight: 600 }}>STANDBY</span>
+            </>
+          )}
+        </div>
+      )}
 
-      {/* ── TOP-RIGHT TELEMETRY BADGE ───────────────────────────────────── */}
-      <div className="stream-overlay-badge stream-badge-top-right" style={{ zIndex: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
-        {isLive ? (
-          <>
-            <Wifi size={11} style={{ color: '#10b981' }} />
-            <span style={{ fontFamily: 'JetBrains Mono', fontSize: 10, color: 'var(--text-primary)' }}>
-              28ms
-            </span>
-            {activeStreamSource === 'screen' ? (
-              <span className="badge badge-primary" style={{ fontSize: 9, padding: '1px 5px' }}>SCREEN</span>
-            ) : (
-              <span className="badge badge-secondary" style={{ fontSize: 9, padding: '1px 5px' }}>CAM</span>
-            )}
-          </>
-        ) : (
-          <>
-            <Wifi size={11} style={{ color: 'var(--text-muted)' }} />
-            <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Offline</span>
-          </>
-        )}
-      </div>
+      {/* ── TOP-RIGHT TELEMETRY BADGE (Inspection View Only) ───────────────── */}
+      {!compact && (
+        <div className="stream-overlay-badge stream-badge-top-right" style={{ zIndex: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+          {isLive ? (
+            <>
+              <Wifi size={11} style={{ color: '#10b981' }} />
+              <span style={{ fontFamily: 'JetBrains Mono', fontSize: 10, color: 'var(--text-primary)' }}>
+                28ms
+              </span>
+              {activeStreamSource === 'screen' ? (
+                <span className="badge badge-primary" style={{ fontSize: 9, padding: '1px 5px' }}>SCREEN</span>
+              ) : (
+                <span className="badge badge-secondary" style={{ fontSize: 9, padding: '1px 5px' }}>CAM</span>
+              )}
+            </>
+          ) : (
+            <>
+              <Wifi size={11} style={{ color: 'var(--text-muted)' }} />
+              <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Offline</span>
+            </>
+          )}
+        </div>
+      )}
 
       {/* ── MAIN STREAM CANVAS / WEBRTC FEED ────────────────────────────── */}
       {isLive ? (
         compact ? (
-          /* Compact Stream Preview for Grid Cards */
+          /* Compact Stream Preview for Grid Cards - Entire Card Feed is Clickable */
           <div
             onClick={() => onInspect && onInspect(candidate)}
+            title="Click stream to deep-dive inspect candidate"
             style={{
               width: '100%',
               height: '100%',
@@ -109,7 +127,8 @@ export default function LiveStreamContainer({
               alignItems: 'center',
               justifyContent: 'center',
               cursor: onInspect ? 'pointer' : 'default',
-              background: 'linear-gradient(180deg, #07090e 0%, #0f1118 100%)'
+              background: 'linear-gradient(180deg, #07090e 0%, #0f1118 100%)',
+              transition: 'background 0.2s ease'
             }}
           >
             {/* Subtle Matrix Scan Background */}
@@ -126,8 +145,8 @@ export default function LiveStreamContainer({
             {/* Candidate Stream Icon & Pulsing Ring */}
             <div
               style={{
-                width: 56,
-                height: 56,
+                width: 52,
+                height: 52,
                 borderRadius: '50%',
                 background: 'rgba(99, 102, 241, 0.12)',
                 border: '1px solid rgba(99, 102, 241, 0.3)',
@@ -140,14 +159,14 @@ export default function LiveStreamContainer({
                 transition: 'transform 0.2s ease'
               }}
             >
-              {activeStreamSource === 'screen' ? <Monitor size={24} /> : <Camera size={24} />}
+              {activeStreamSource === 'screen' ? <Monitor size={22} /> : <Camera size={22} />}
               <span
                 style={{
                   position: 'absolute',
                   bottom: -2,
                   right: -2,
-                  width: 12,
-                  height: 12,
+                  width: 11,
+                  height: 11,
                   borderRadius: '50%',
                   background: '#10b981',
                   border: '2px solid #090a0f',
@@ -156,35 +175,13 @@ export default function LiveStreamContainer({
               />
             </div>
 
-            <div style={{ textAlign: 'center', zIndex: 2, marginTop: 10, padding: '0 12px' }}>
+            <div style={{ textAlign: 'center', zIndex: 2, marginTop: 8, padding: '0 12px' }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)' }}>
                 {candidateName}
               </div>
               <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
-                WebRTC Stream Active · Click to Deep-Dive
+                WebRTC Stream Active
               </div>
-            </div>
-
-            {/* Hover Inspect CTA pill */}
-            <div
-              style={{
-                position: 'absolute',
-                bottom: 10,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 5,
-                background: 'rgba(0, 0, 0, 0.65)',
-                backdropFilter: 'blur(4px)',
-                border: '1px solid rgba(255, 255, 255, 0.1)',
-                borderRadius: 9999,
-                padding: '3px 10px',
-                fontSize: 10,
-                color: 'var(--text-secondary)',
-                zIndex: 3
-              }}
-            >
-              <Maximize2 size={10} />
-              <span>Click to Expand</span>
             </div>
           </div>
         ) : (
