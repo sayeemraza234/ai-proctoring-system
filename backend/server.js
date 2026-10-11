@@ -13,6 +13,7 @@ const mongoose = require('mongoose');
 const { User, Question, Interview, Log, Chat } = require('./models');
 const { startMongoDB } = require('./mongoStart');
 const { generateSmartQuestions } = require('./questionGenerator');
+const { generateSmartEvaluation } = require('./evaluationGenerator');
 
 const app = express();
 const server = http.createServer(app);
@@ -905,23 +906,40 @@ ${code}`;
     }
 });
 
-// ── AI Evaluation (Gemini) ────────────────────────────────────────────────────
+// ── AI Evaluation (Hybrid: Gemini 2.5 Flash if key present, Smart Synthesis Engine fallback) ──
 
 app.post('/api/ai/evaluate', async (req, res) => {
     try {
-        const { interviewId, submissions, questions } = req.body;
+        const { interviewId, submissions = [], questions = [] } = req.body;
         const GEMINI_KEY = getGeminiKey();
 
-        if (!GEMINI_KEY) {
-            return res.json({
-                success: false,
-                message: 'Gemini API key not configured. Please add GEMINI_API_KEY to your backend environment variables (Render Dashboard or backend/.env).',
-                evaluation: null
-            });
+        let interview = null;
+        let candidateName = 'Candidate';
+        let jobRole = 'Software Engineer';
+        let trustScore = 100;
+
+        if (interviewId) {
+            try {
+                interview = await Interview.findById(interviewId).populate('candidateId', 'username fullname');
+                if (interview) {
+                    candidateName = interview.candidateId?.fullname || interview.candidateId?.username || 'Candidate';
+                    jobRole = interview.jobRole || 'Software Engineer';
+                    trustScore = interview.trustScore !== undefined ? interview.trustScore : 100;
+                }
+            } catch {}
         }
 
-        const prompt = `You are an expert technical interviewer evaluating a software engineering candidate. 
+        let evaluation = null;
+
+        // 1. If Gemini key is configured, attempt live Google Gemini LLM evaluation
+        if (GEMINI_KEY) {
+            try {
+                const prompt = `You are an expert technical interviewer evaluating a software engineering candidate. 
 Evaluate the following code submissions objectively and return a JSON response.
+
+Candidate: ${candidateName}
+Role: ${jobRole}
+Session Integrity Score: ${trustScore}%
 
 Questions and Submissions:
 ${questions.map((q, i) => `
@@ -955,29 +973,46 @@ Return a JSON object with this exact structure:
   "weaknessAreas": ["..."]
 }`;
 
-        const geminiRes = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`,
-            {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    contents: [{ parts: [{ text: prompt }] }],
-                    generationConfig: { responseMimeType: 'application/json' }
-                })
+                const geminiRes = await fetch(
+                    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`,
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            contents: [{ parts: [{ text: prompt }] }],
+                            generationConfig: { responseMimeType: 'application/json' }
+                        })
+                    }
+                );
+
+                const geminiData = await geminiRes.json();
+                if (geminiRes.ok) {
+                    const text = geminiData.candidates?.[0]?.content?.parts?.[0]?.text;
+                    if (text) {
+                        evaluation = JSON.parse(text);
+                        evaluation.source = 'gemini';
+                    }
+                } else {
+                    console.warn('[AI-EVALUATE] Gemini API error, activating Smart Evaluation Engine fallback:', geminiData.error?.message);
+                }
+            } catch (geminiErr) {
+                console.warn('[AI-EVALUATE] Gemini request failed, activating Smart Evaluation Engine fallback:', sanitizeError(geminiErr?.message, GEMINI_KEY));
             }
-        );
-
-        const geminiData = await geminiRes.json();
-        if (!geminiRes.ok) {
-            throw new Error(geminiData.error?.message || 'Gemini evaluation request failed');
         }
-        const text = geminiData.candidates?.[0]?.content?.parts?.[0]?.text;
 
-        if (!text) throw new Error('Gemini returned no content');
+        // 2. Fallback to Smart Technical & Proctoring Evaluation Engine (Zero setup / Instant)
+        if (!evaluation) {
+            evaluation = generateSmartEvaluation({
+                interviewId,
+                submissions,
+                questions,
+                candidateName,
+                jobRole,
+                trustScore
+            });
+        }
 
-        const evaluation = JSON.parse(text);
-
-        // Save to DB
+        // Save evaluation to DB
         if (interviewId) {
             await Interview.findByIdAndUpdate(interviewId, {
                 aiEvaluation: JSON.stringify(evaluation.perQuestion),
@@ -986,7 +1021,7 @@ Return a JSON object with this exact structure:
             });
         }
 
-        res.json({ success: true, evaluation });
+        res.json({ success: true, source: evaluation.source || 'smart_synthesis_engine', evaluation });
     } catch (err) {
         const sanitized = sanitizeError(err.message, configuredSecret('GEMINI_API_KEY'));
         console.error('[AI-EVALUATE] Error:', sanitized);
@@ -1060,47 +1095,66 @@ Return a JSON array where each item has:
 // AI Interview Co-Pilot (get follow-up questions)
 app.post('/api/ai/suggest-followup', async (req, res) => {
     try {
-        const { question, candidateAnswer, jobRole } = req.body;
+        const { question = 'Technical coding problem', candidateAnswer = '', jobRole = 'Software Engineer' } = req.body || {};
         const GEMINI_KEY = getGeminiKey();
 
-        if (!GEMINI_KEY) {
-            return res.json({
-                success: false,
-                message: 'Gemini API key not configured. Please add GEMINI_API_KEY to your backend environment variables (Render Dashboard or backend/.env).',
-                suggestions: []
-            });
-        }
-
-        const prompt = `You are an expert technical interviewer. The candidate is applying for ${jobRole || 'Software Engineer'}.
+        // 1. If Gemini key is available, query Gemini
+        if (GEMINI_KEY) {
+            try {
+                const prompt = `You are an expert technical interviewer. The candidate is applying for ${jobRole || 'Software Engineer'}.
 
 Original Question: "${question}"
 Candidate's Answer: "${candidateAnswer}"
 
 Based on their answer, suggest 3 sharp follow-up questions to probe deeper. Return JSON array of strings.`;
 
-        const geminiRes = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`,
-            {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    contents: [{ parts: [{ text: prompt }] }],
-                    generationConfig: { responseMimeType: 'application/json' }
-                })
-            }
-        );
+                const geminiRes = await fetch(
+                    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`,
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            contents: [{ parts: [{ text: prompt }] }],
+                            generationConfig: { responseMimeType: 'application/json' }
+                        })
+                    }
+                );
 
-        const geminiData = await geminiRes.json();
-        if (!geminiRes.ok) {
-            throw new Error(geminiData.error?.message || 'Gemini follow-up request failed');
+                const geminiData = await geminiRes.json();
+                if (geminiRes.ok) {
+                    const text = geminiData.candidates?.[0]?.content?.parts?.[0]?.text;
+                    if (text) {
+                        const suggestions = JSON.parse(text);
+                        return res.json({ success: true, source: 'gemini', suggestions });
+                    }
+                }
+            } catch (gemErr) {
+                console.warn('[AI-FOLLOWUP] Gemini error, using smart synthesis fallback:', gemErr?.message);
+            }
         }
-        const text = geminiData.candidates?.[0]?.content?.parts?.[0]?.text;
-        const suggestions = JSON.parse(text);
-        res.json({ success: true, suggestions });
+
+        // 2. Smart Synthesis Follow-up Generator (Zero setup / Instant)
+        const role = String(jobRole).toLowerCase();
+        const baseSuggestions = [
+            `Can you walk through your edge-case handling if the input scale increases to 10^7 elements?`,
+            `What is the theoretical Big-O time and space complexity of your current implementation, and could we trade memory to make it faster?`,
+            `How would you test this function in a CI/CD pipeline, and what mock fixtures or boundary inputs would you check?`
+        ];
+
+        if (role.includes('frontend') || role.includes('react')) {
+            baseSuggestions[1] = `How would you prevent unnecessary component re-renders or memoize this computation in React?`;
+        } else if (role.includes('backend') || role.includes('system')) {
+            baseSuggestions[1] = `How would you architect concurrency control or database transactions if multiple users execute this simultaneously?`;
+        }
+
+        res.json({
+            success: true,
+            source: 'smart_synthesis_engine',
+            suggestions: baseSuggestions
+        });
     } catch (err) {
-        const sanitized = sanitizeError(err.message, getGeminiKey());
-        console.error('[AI-FOLLOWUP] Error:', sanitized);
-        res.status(500).json({ error: sanitized });
+        console.error('[AI-FOLLOWUP] Error:', err);
+        res.status(500).json({ error: 'Failed to generate follow-up suggestions' });
     }
 });
 
