@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   Camera, Maximize2, MessageSquare, AlertTriangle, PhoneOff, Play,
-  Wifi, Shield, Clock, ExternalLink, Flag, MoreVertical, Radio, Check
+  Wifi, Shield, Clock, ExternalLink, Flag, MoreVertical, Radio, Check, Tv
 } from 'lucide-react';
 import ViolationPills from './ViolationPills';
 import LiveStreamContainer from './LiveStreamContainer';
@@ -10,6 +10,8 @@ export default function CandidateCard({
   candidate,
   isSelected = false,
   onInspect,
+  onQuickExpand,
+  onPiP,
   onIntervene,
   onFlagIncident,
   onTerminate,
@@ -105,6 +107,7 @@ export default function CandidateCard({
         </div>
 
         {/* Live Elapsed Timer */}
+        {/* Live Elapsed Timer & Corner Quick Actions */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
           {isLive && (
             <div style={{
@@ -124,6 +127,30 @@ export default function CandidateCard({
               <span>{formatTimer(elapsedSecs)}</span>
             </div>
           )}
+
+          {/* Picture-in-Picture & Quick-Expand Corner Buttons */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onPiP && onPiP(candidate); }}
+              className="btn btn-ghost btn-icon btn-sm"
+              style={{ width: 22, height: 22, padding: 0, color: 'var(--text-muted)' }}
+              title="Picture-in-Picture floating stream"
+              aria-label="Picture-in-Picture"
+            >
+              <Tv size={11} />
+            </button>
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onQuickExpand && onQuickExpand(candidate); }}
+              className="btn btn-ghost btn-icon btn-sm"
+              style={{ width: 22, height: 22, padding: 0, color: 'var(--text-muted)' }}
+              title="Quick-Expand candidate into full overlay modal"
+              aria-label="Quick-Expand"
+            >
+              <Maximize2 size={11} />
+            </button>
+          </div>
         </div>
       </div>
 

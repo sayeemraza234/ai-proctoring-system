@@ -8,7 +8,7 @@ import {
   Send, Bell, HelpCircle, Brain, Save, Mic,
   ArrowLeft, PlusCircle, AlertCircle, PhoneOff, AlertOctagon,
   Sparkles, Layout, Split, Moon, Sun, Palette,
-  PanelLeftClose, PanelLeftOpen, Radio, Copy, Check, Maximize2,
+  PanelLeftClose, PanelLeftOpen, Radio, Copy, Check, Maximize2, Minimize2,
   MoreVertical, Settings, Layers, Filter
 } from 'lucide-react';
 import LiveStream from './components/LiveStream';
@@ -258,8 +258,56 @@ export default function App() {
   const [linkedIn, setLinkedIn] = useState('');
 
   // Sidebar collapsed state & profile menu popover
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
+    try { return localStorage.getItem('sidebar_collapsed') === 'true'; } catch { return false; }
+  });
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const [isTheaterMode, setIsTheaterMode] = useState(false);
+
+  const toggleSidebar = () => {
+    setIsSidebarCollapsed(prev => {
+      const next = !prev;
+      try { localStorage.setItem('sidebar_collapsed', String(next)); } catch {}
+      return next;
+    });
+  };
+
+  const toggleTheaterMode = async () => {
+    if (!isTheaterMode) {
+      setIsTheaterMode(true);
+      if (document.documentElement.requestFullscreen && !document.fullscreenElement) {
+        try { await document.documentElement.requestFullscreen(); } catch {}
+      }
+    } else {
+      exitTheaterMode();
+    }
+  };
+
+  const exitTheaterMode = async () => {
+    setIsTheaterMode(false);
+    if (document.fullscreenElement && document.exitFullscreen) {
+      try { await document.exitFullscreen(); } catch {}
+    }
+  };
+
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      if (!document.fullscreenElement && isTheaterMode) {
+        setIsTheaterMode(false);
+      }
+    };
+    const onKeyDown = (e) => {
+      if (e.key === 'Escape' && isTheaterMode) {
+        exitTheaterMode();
+      }
+    };
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('fullscreenchange', onFullscreenChange);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [isTheaterMode]);
 
   // Toast system
   const [toasts, setToasts] = useState([]);
@@ -1947,7 +1995,7 @@ export default function App() {
       )}
 
       {/* ── SIDEBAR ───────────────────────────────────────────────────────── */}
-      <aside className="sidebar" style={{ width: isSidebarCollapsed ? 64 : 240 }}>
+      <aside className="sidebar" style={{ width: isSidebarCollapsed ? 64 : 240, display: isTheaterMode ? 'none' : undefined }}>
         {/* Brand & Context */}
         <div style={{
           height: 60,
@@ -1999,7 +2047,7 @@ export default function App() {
             </div>
           )}
           <button
-            onClick={() => setIsSidebarCollapsed(c => !c)}
+            onClick={toggleSidebar}
             className="btn btn-ghost btn-icon btn-sm"
             title={isSidebarCollapsed ? 'Expand Sidebar' : 'Collapse Sidebar'}
           >
@@ -2100,9 +2148,36 @@ export default function App() {
       </aside>
 
       {/* ── MAIN CONTENT VIEWPORT ────────────────────────────────────────── */}
-      <div className="main-content" onClick={() => isProfileMenuOpen && setIsProfileMenuOpen(false)}>
+      <div
+        className="main-content"
+        onClick={() => isProfileMenuOpen && setIsProfileMenuOpen(false)}
+        style={isTheaterMode ? { margin: 0, padding: 0, width: '100vw', height: '100vh', position: 'fixed', inset: 0, zIndex: 9999, background: 'var(--bg-surface)' } : undefined}
+      >
+        {/* Floating Theater Mode Exit Banner */}
+        {isTheaterMode && (
+          <div className="theater-mode-banner">
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)' }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#10b981', boxShadow: '0 0 6px #10b981' }} />
+              Theater Mode Active · 100% Full View
+            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Press Esc to Exit</span>
+              <button
+                onClick={exitTheaterMode}
+                className="btn btn-secondary btn-sm"
+                style={{ padding: '2px 8px', height: 22, fontSize: 10, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                title="Exit Full View (Esc)"
+              >
+                <Minimize2 size={11} />
+                <span>Exit</span>
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Top Header */}
-        <header className="app-header">
+        {!isTheaterMode && (
+          <header className="app-header">
           {/* Breadcrumbs Left Hierarchy */}
           <div className="header-breadcrumb">
             <span className="header-breadcrumb-root">
@@ -2241,6 +2316,7 @@ export default function App() {
             )}
           </div>
         </header>
+        )}
 
         {/* Content Body */}
         <div className="content-viewport">
@@ -2413,10 +2489,13 @@ export default function App() {
              SECTION: LIVE MONITOR (REVOLUTIONIZED WORKSPACE)
              ══════════════════════════════════════════════════════════════ */}
           {activeSection === 'live' && (
-            <div className="animate-fade-in" style={{ height: 'calc(100vh - 104px)', overflow: 'hidden' }}>
+            <div className="animate-fade-in" style={{ height: isTheaterMode ? '100vh' : 'calc(100vh - 104px)', overflow: 'hidden' }}>
               <LiveMonitoringView
                 candidates={allCandidates}
                 selectedCandidate={selectedInterview}
+                isTheaterMode={isTheaterMode}
+                toggleTheaterMode={toggleTheaterMode}
+                exitTheaterMode={exitTheaterMode}
                 onSelectCandidate={(c) => {
                   setSelectedInterview({
                     id: c.interview_id || c.id,

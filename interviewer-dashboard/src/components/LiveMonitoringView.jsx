@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  Grid, Maximize2, Split, Camera, Code, Sparkles, PhoneOff, Play,
+  Grid, Maximize2, Minimize2, Split, Camera, Code, Sparkles, PhoneOff, Play,
   Shield, ShieldAlert, MessageSquare, Flag, Search, Filter,
   Users, RefreshCw, X, AlertTriangle, CheckCircle2, ChevronRight,
-  Radio, Volume2, Eye, LayoutGrid, Monitor
+  Radio, Volume2, Eye, LayoutGrid, Monitor, Tv, Columns
 } from 'lucide-react';
 import CandidateCard from './CandidateCard';
 import LiveStreamContainer from './LiveStreamContainer';
@@ -12,6 +12,9 @@ import IncidentDrawer from './IncidentDrawer';
 export default function LiveMonitoringView({
   candidates = [],
   selectedCandidate = null,
+  isTheaterMode = false,
+  toggleTheaterMode,
+  exitTheaterMode,
   onSelectCandidate,
   onActivateInterview,
   onTerminateInterview,
@@ -40,11 +43,47 @@ export default function LiveMonitoringView({
 }) {
   // Layout state
   const [viewMode, setViewMode] = useState('grid'); // 'grid' | 'focused'
+  const [layoutDensity, setLayoutDensity] = useState(() => {
+    try {
+      return localStorage.getItem('live_monitor_density') || 'standard';
+    } catch {
+      return 'standard';
+    }
+  });
+  const [stageCandidateId, setStageCandidateId] = useState(null);
+  const [quickExpandCandidate, setQuickExpandCandidate] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all'); // 'all' | 'active' | 'flagged' | 'scheduled'
   const [isIncidentDrawerOpen, setIsIncidentDrawerOpen] = useState(false);
   const [focusedLayoutMode, setFocusedLayoutMode] = useState('split'); // 'split' | 'videoFocus' | 'codeFocus'
   const [highlightedCandidateId, setHighlightedCandidateId] = useState(null);
+
+  const handleSetLayoutDensity = (density) => {
+    setLayoutDensity(density);
+    try {
+      localStorage.setItem('live_monitor_density', density);
+    } catch (e) {
+      console.warn('Failed to save layout density to localStorage', e);
+    }
+  };
+
+  const handleRequestPiP = async (candidate) => {
+    const candidateId = candidate.candidate_id || candidate.id;
+    const cardEl = document.getElementById(`candidate-card-${candidateId}`);
+    const videoEl = cardEl ? cardEl.querySelector('video') : null;
+    if (videoEl && document.pictureInPictureEnabled) {
+      try {
+        if (document.pictureInPictureElement) {
+          await document.exitPictureInPicture();
+        }
+        await videoEl.requestPictureInPicture();
+        return;
+      } catch (err) {
+        console.warn('PiP request failed, opening Quick-Expand modal:', err);
+      }
+    }
+    setQuickExpandCandidate(candidate);
+  };
 
   // Modals state
   const [warningModalCandidate, setWarningModalCandidate] = useState(null);
@@ -294,10 +333,69 @@ export default function LiveMonitoringView({
               <span>Focus View</span>
             </button>
           </div>
+
+          {/* Sizing / Density Controls (Active in Grid View) */}
+          {viewMode === 'grid' && (
+            <>
+              <div style={{ width: 1, height: 20, background: 'var(--border-subtle)', margin: '0 4px' }} />
+              <div className="density-toggle-group" title="Adjust grid layout sizing density">
+                <button
+                  type="button"
+                  onClick={() => handleSetLayoutDensity('compact')}
+                  className={`density-btn ${layoutDensity === 'compact' ? 'active' : ''}`}
+                  title="Compact: 3-4 cards per row (Dense surveillance)"
+                  aria-label="Compact Density"
+                >
+                  <LayoutGrid size={12} />
+                  <span>Compact</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSetLayoutDensity('standard')}
+                  className={`density-btn ${layoutDensity === 'standard' ? 'active' : ''}`}
+                  title="Standard: 2 cards per row (Default balanced view)"
+                  aria-label="Standard Density"
+                >
+                  <Grid size={12} />
+                  <span>Standard</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSetLayoutDensity('expanded')}
+                  className={`density-btn ${layoutDensity === 'expanded' ? 'active' : ''}`}
+                  title="Stage / Expanded: 1 primary card (75%) + thumbnail ribbon"
+                  aria-label="Stage Density"
+                >
+                  <Columns size={12} />
+                  <span>Stage</span>
+                </button>
+              </div>
+            </>
+          )}
         </div>
 
-        {/* Right Edge: Quick Telemetry, Broadcast Notice, & Audit Feed Toggle */}
+        {/* Right Edge: Theater / Fullscreen Toggle, Broadcast Notice, & Audit Feed Toggle */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto' }}>
+          {/* Theater View Toggle Button */}
+          <button
+            type="button"
+            onClick={toggleTheaterMode}
+            className={`btn btn-secondary btn-sm ${isTheaterMode ? 'active' : ''}`}
+            title={isTheaterMode ? "Exit Theater Mode (Esc)" : "Theater View: Full viewport distraction-free monitoring"}
+            style={{
+              height: 32,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              background: isTheaterMode ? 'rgba(99, 102, 241, 0.16)' : 'var(--bg-elevated)',
+              borderColor: isTheaterMode ? 'var(--primary)' : 'var(--border-subtle)',
+              color: isTheaterMode ? 'var(--primary)' : 'var(--text-secondary)'
+            }}
+          >
+            {isTheaterMode ? <Minimize2 size={13} /> : <Maximize2 size={13} />}
+            <span>{isTheaterMode ? 'Exit Theater' : 'Theater View'}</span>
+          </button>
+
           {/* Broadcast Notice Button */}
           <button
             type="button"
@@ -477,7 +575,146 @@ export default function LiveMonitoringView({
                 )}
               </div>
             ) : (
-              <div className="live-grid">
+            ) : layoutDensity === 'expanded' ? (
+              <div className="stage-view-wrapper">
+                {/* 72% Center Stage Primary Candidate */}
+                {(() => {
+                  const activeStageCandidate = filteredCandidates.find(c =>
+                    (c.candidate_id || c.id) === (stageCandidateId || selectedCandidate?.candidate_id || selectedCandidate?.id)
+                  ) || filteredCandidates[0];
+
+                  if (!activeStageCandidate) return null;
+                  const stageId = activeStageCandidate.candidate_id || activeStageCandidate.id;
+                  const isSelected = (selectedCandidate?.candidate_id || selectedCandidate?.id) === stageId;
+                  const isHighlighted = highlightedCandidateId === stageId;
+
+                  return (
+                    <div style={{ flex: '1 1 72%', height: '100%', overflowY: 'auto' }}>
+                      <div
+                        id={`candidate-card-${stageId}`}
+                        style={{
+                          height: '100%',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          position: 'relative',
+                          transition: 'box-shadow 0.25s ease, transform 0.25s ease',
+                          ...(isHighlighted && {
+                            boxShadow: '0 0 0 3px #ef4444, 0 8px 24px rgba(239, 68, 68, 0.35)',
+                            borderRadius: 12,
+                            transform: 'scale(1.005)',
+                            zIndex: 5
+                          })
+                        }}
+                      >
+                        <CandidateCard
+                          candidate={activeStageCandidate}
+                          isSelected={isSelected}
+                          onInspect={handleInspectCandidate}
+                          onQuickExpand={(c) => setQuickExpandCandidate(c)}
+                          onPiP={handleRequestPiP}
+                          onIntervene={(c) => {
+                            setWarningModalCandidate(c);
+                            setWarningMessage(warningPresets[0]);
+                          }}
+                          onFlagIncident={(c) => {
+                            setFlagModalCandidate(c);
+                          }}
+                          onTerminate={(c) => {
+                            setTerminateModalCandidate(c);
+                          }}
+                          onActivate={onActivateInterview}
+                        />
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* 28% Side Thumbnail Ribbon */}
+                <div
+                  className="stage-thumbnail-ribbon"
+                  style={{
+                    flex: '0 0 28%',
+                    maxWidth: 320,
+                    minWidth: 230,
+                    height: '100%',
+                    overflowY: 'auto'
+                  }}
+                >
+                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span>Candidate Queue ({filteredCandidates.length})</span>
+                    <span style={{ fontSize: 10, fontWeight: 500, color: 'var(--text-muted)' }}>Click to feature</span>
+                  </div>
+
+                  {filteredCandidates.map(candidate => {
+                    const candidateId = candidate.candidate_id || candidate.id;
+                    const currentActiveStageId = stageCandidateId || selectedCandidate?.candidate_id || selectedCandidate?.id || filteredCandidates[0]?.candidate_id || filteredCandidates[0]?.id;
+                    const isCurrentStage = candidateId === currentActiveStageId;
+                    const isLive = candidate.status === 'active' || candidate.status === 'in_progress';
+                    const trustScore = Math.round(candidate.trust_score ?? 100);
+
+                    return (
+                      <div
+                        key={candidateId}
+                        onClick={() => {
+                          setStageCandidateId(candidateId);
+                          onSelectCandidate(candidate);
+                        }}
+                        className="stage-thumbnail-item card"
+                        style={{
+                          padding: '10px 12px',
+                          cursor: 'pointer',
+                          border: isCurrentStage ? '2px solid var(--primary)' : '1px solid var(--border-subtle)',
+                          background: isCurrentStage ? 'rgba(99, 102, 241, 0.08)' : 'var(--bg-card)',
+                          borderRadius: 10,
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 6
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                            <div style={{
+                              width: 26,
+                              height: 26,
+                              borderRadius: 6,
+                              background: isLive ? 'linear-gradient(135deg, #6366f1 0%, #4338ca 100%)' : 'var(--bg-elevated)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              color: '#ffffff',
+                              fontSize: 10,
+                              fontWeight: 700,
+                              flexShrink: 0
+                            }}>
+                              {(candidate.candidate_name || candidate.fullname || 'C')[0].toUpperCase()}
+                            </div>
+                            <div style={{ minWidth: 0 }}>
+                              <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.2 }} className="truncate">
+                                {candidate.candidate_name || candidate.fullname}
+                              </div>
+                              <div style={{ fontSize: 10, color: 'var(--text-muted)' }} className="truncate">
+                                {candidate.job_role || 'Software Engineer'}
+                              </div>
+                            </div>
+                          </div>
+                          <span className={`badge ${isLive ? 'badge-active' : 'badge-scheduled'}`} style={{ fontSize: 8, padding: '1px 5px' }}>
+                            {isLive ? 'LIVE' : candidate.status}
+                          </span>
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 10, color: 'var(--text-muted)', paddingTop: 4, borderTop: '1px solid var(--border-subtle)' }}>
+                          <span>Trust: <strong style={{ color: trustScore >= 80 ? 'var(--success)' : trustScore >= 50 ? 'var(--warning)' : 'var(--danger)' }}>{trustScore}%</strong></span>
+                          {isCurrentStage && (
+                            <span style={{ color: 'var(--primary)', fontWeight: 700 }}>Featured</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              <div className={`live-grid ${layoutDensity === 'compact' ? 'density-compact' : 'density-standard'}`}>
                 {filteredCandidates.map(candidate => {
                   const candidateId = candidate.candidate_id || candidate.id;
                   const isSelected = (selectedCandidate?.candidate_id || selectedCandidate?.id) === candidateId;
@@ -502,6 +739,8 @@ export default function LiveMonitoringView({
                         candidate={candidate}
                         isSelected={isSelected}
                         onInspect={handleInspectCandidate}
+                        onQuickExpand={(c) => setQuickExpandCandidate(c)}
+                        onPiP={handleRequestPiP}
                         onIntervene={(c) => {
                           setWarningModalCandidate(c);
                           setWarningMessage(warningPresets[0]);
@@ -1246,6 +1485,201 @@ export default function LiveMonitoringView({
           </div>
         </div>
       )}
+
+      {/* ══════════════════════════════════════════════════════════════════════
+         MODAL 5: CANDIDATE QUICK-EXPAND FULL OVERLAY MODAL
+         ══════════════════════════════════════════════════════════════════════ */}
+      {quickExpandCandidate && (() => {
+        const c = quickExpandCandidate;
+        const isLive = c.status === 'active' || c.status === 'in_progress';
+        const trustScore = Math.round(c.trust_score ?? 100);
+        const getTrustColor = (score) => score >= 80 ? 'var(--success)' : score >= 50 ? 'var(--warning)' : 'var(--danger)';
+
+        return (
+          <div
+            className="modal-backdrop animate-fade-in"
+            style={{ zIndex: 11000, padding: 16 }}
+            role="dialog"
+            aria-modal="true"
+            onClick={() => setQuickExpandCandidate(null)}
+          >
+            <div
+              className="modal-card"
+              style={{
+                maxWidth: 960,
+                width: '100%',
+                maxHeight: '94vh',
+                display: 'flex',
+                flexDirection: 'column',
+                padding: 0,
+                overflow: 'hidden',
+                background: 'var(--bg-card)',
+                boxShadow: '0 24px 60px rgba(0, 0, 0, 0.65)',
+                border: '1px solid var(--border-default)'
+              }}
+              onClick={e => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '12px 18px',
+                borderBottom: '1px solid var(--border-subtle)',
+                background: 'var(--bg-surface)'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div style={{
+                    width: 36,
+                    height: 36,
+                    borderRadius: 8,
+                    background: 'linear-gradient(135deg, #6366f1 0%, #4338ca 100%)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#ffffff',
+                    fontWeight: 800,
+                    fontSize: 14
+                  }}>
+                    {(c.candidate_name || c.fullname || 'C')[0].toUpperCase()}
+                  </div>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <h3 style={{ fontSize: 15, fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>
+                        {c.candidate_name || c.fullname}
+                      </h3>
+                      <span className={`badge ${isLive ? 'badge-active' : 'badge-completed'}`} style={{ fontSize: 9 }}>
+                        {isLive ? 'LIVE' : c.status}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                      <span>{c.job_role || 'Software Engineer'}</span>
+                      <span style={{ margin: '0 6px' }}>•</span>
+                      <span>Session #{String(c.interview_id || c.id || '').slice(-6)}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Header Actions: PiP, Full Focus, Close */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{
+                    padding: '4px 10px',
+                    borderRadius: 6,
+                    background: 'var(--bg-elevated)',
+                    border: '1px solid var(--border-subtle)',
+                    fontSize: 11,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6
+                  }}>
+                    <span style={{ color: 'var(--text-muted)' }}>Trust Score:</span>
+                    <strong style={{ fontFamily: 'JetBrains Mono', color: getTrustColor(trustScore) }}>{trustScore}%</strong>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => handleRequestPiP(c)}
+                    className="btn btn-secondary btn-sm"
+                    title="Open stream in Picture-in-Picture window"
+                    style={{ height: 30, display: 'flex', alignItems: 'center', gap: 5 }}
+                  >
+                    <Tv size={12} />
+                    <span>PiP</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setQuickExpandCandidate(null);
+                      handleInspectCandidate(c);
+                    }}
+                    className="btn btn-secondary btn-sm"
+                    title="Open in deep-dive Focus Mode with live code editor"
+                    style={{ height: 30, display: 'flex', alignItems: 'center', gap: 5 }}
+                  >
+                    <Maximize2 size={12} />
+                    <span>Focus Mode</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setQuickExpandCandidate(null)}
+                    className="btn btn-ghost btn-icon btn-sm"
+                    style={{ width: 30, height: 30 }}
+                  >
+                    <X size={15} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Feed Body */}
+              <div style={{ flex: 1, minHeight: 380, maxHeight: 520, background: '#0a0b10', position: 'relative' }}>
+                <LiveStreamContainer
+                  candidate={c}
+                  roomId={c.interview_id || c.id}
+                  height={460}
+                  isFocused={true}
+                />
+              </div>
+
+              {/* Quick Actions Footer */}
+              <div style={{
+                padding: '12px 18px',
+                borderTop: '1px solid var(--border-subtle)',
+                background: 'var(--bg-surface)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Proctor Controls:</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setWarningModalCandidate(c);
+                      setWarningMessage(warningPresets[0]);
+                    }}
+                    className="btn btn-secondary btn-sm"
+                    style={{ height: 28, fontSize: 11 }}
+                  >
+                    <MessageSquare size={12} />
+                    <span>Send Warning</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFlagModalCandidate(c)}
+                    className="btn btn-secondary btn-sm"
+                    style={{ height: 28, fontSize: 11 }}
+                  >
+                    <Flag size={12} />
+                    <span>Flag Violation</span>
+                  </button>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <button
+                    type="button"
+                    onClick={() => setTerminateModalCandidate(c)}
+                    className="btn btn-danger btn-sm"
+                    style={{ height: 28, fontSize: 11 }}
+                  >
+                    <PhoneOff size={12} />
+                    <span>Terminate Session</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setQuickExpandCandidate(null)}
+                    className="btn btn-secondary btn-sm"
+                    style={{ height: 28, fontSize: 11 }}
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
