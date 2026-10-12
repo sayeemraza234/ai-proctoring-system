@@ -5,11 +5,13 @@ backend/node_modules/
 electron-client/node_modules/
 interviewer-dashboard/node_modules/
 
-# Environment Variables & Secrets
+# Environment Variables & Secrets (All environments, excluding example templates)
 .env
-.env.local
-.env.*.local
-backend/.env
+.env*
+*.env
+**/.env*
+!.env.example
+!**/.env.example
 
 # Build outputs
 dist/

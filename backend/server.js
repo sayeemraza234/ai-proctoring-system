@@ -1,13 +1,19 @@
+const path = require('path');
+// Load environment variables with fallback from local directory and parent root
+require('dotenv').config({ path: path.resolve(__dirname, '.env') });
+require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
 require('dotenv').config();
+
 const express = require('express');
 const http = require('http');
-const path = require('path');
 const { spawn } = require('child_process');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const mongoose = require('mongoose');
 const { User, Question, Interview, Log, Chat } = require('./models');
 const { startMongoDB } = require('./mongoStart');
+const { generateSmartQuestions } = require('./questionGenerator');
+const { generateSmartEvaluation } = require('./evaluationGenerator');
 
 const app = express();
 const server = http.createServer(app);
@@ -17,12 +23,55 @@ app.use(express.json({ limit: '10mb' }));
 
 const PORT = process.env.PORT || 5000;
 
+// ─── Secret Management & Masking Utilities ────────────────────────────────────
 function configuredSecret(name) {
     const value = process.env[name];
-    if (!value || !value.trim() || value.includes('<') || value === 'your-api-key-here') {
+    if (
+        !value ||
+        !value.trim() ||
+        value.includes('<') ||
+        value === 'your-api-key-here' ||
+        value === 'your_gemini_api_key_here' ||
+        value === 'your_api_key_here' ||
+        value === 'your_judge0_api_key_here'
+    ) {
         return null;
     }
     return value.trim();
+}
+
+/**
+ * Retrieves the Google Gemini API key checking standard environment variable aliases.
+ */
+function getGeminiKey() {
+    return (
+        configuredSecret('GEMINI_API_KEY') ||
+        configuredSecret('GOOGLE_GEMINI_API_KEY') ||
+        configuredSecret('GOOGLE_API_KEY')
+    );
+}
+
+/**
+ * Returns a masked representation of sensitive keys for logs or safe UI reporting.
+ * e.g., "AIzaSy...ABCD" (only prefix and last 4 characters visible).
+ */
+function maskSecret(key) {
+    if (!key || typeof key !== 'string') return null;
+    const clean = key.trim();
+    if (clean.length <= 8) return '••••••••';
+    return `${clean.substring(0, 6)}...${clean.slice(-4)}`;
+}
+
+/**
+ * Sanitizes errors and logs so raw secrets are never leaked in stack traces or responses.
+ */
+function sanitizeError(msg, secret) {
+    if (!msg || typeof msg !== 'string') return 'An error occurred';
+    if (secret && typeof secret === 'string' && secret.length > 4) {
+        const escaped = secret.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        return msg.replace(new RegExp(escaped, 'g'), '[REDACTED_API_KEY]');
+    }
+    return msg;
 }
 
 // ─── MongoDB Connection ───────────────────────────────────────────────────────
@@ -379,42 +428,56 @@ app.post('/api/interviews/:id/end', async (req, res) => {
     }
 });
 
-// Ask a manual question during an active interview
-app.post('/api/interviews/:id/ask-question', async (req, res) => {
+// Ask or assign a question to an interview session
+const handleAssignQuestionToInterview = async (req, res) => {
     try {
-        const { title, description, type, difficulty, topic } = req.body;
-        if (!title?.trim() || !description?.trim()) {
-            return res.status(400).json({ error: 'A question title and description are required.' });
-        }
+        const { questionId, title, description, type, difficulty, topic, starterCode, options, testCases } = req.body;
         if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
             return res.status(400).json({ error: 'Invalid interview id.' });
         }
         const interview = await Interview.findById(req.params.id);
         if (!interview) return res.status(404).json({ error: 'Interview not found' });
 
-        // Create the new question
-        const question = await Question.create({
-            title,
-            description,
-            type: type || 'coding',
-            difficulty: difficulty || 'medium',
-            topic: topic || 'General',
-            starterCode: type === 'coding' ? '// Write your code solution here\n' : '',
-            createdBy: interview.interviewerId
-        });
+        let question = null;
+        if (questionId && mongoose.Types.ObjectId.isValid(questionId)) {
+            question = await Question.findById(questionId);
+        }
 
-        // Add to interview questions list
-        interview.questions.push(question._id);
-        await interview.save();
+        if (!question) {
+            if (!title?.trim() || !description?.trim()) {
+                return res.status(400).json({ error: 'A question title and description are required.' });
+            }
+            question = await Question.create({
+                title,
+                description,
+                type: type || 'coding',
+                difficulty: difficulty || 'medium',
+                topic: topic || 'General',
+                starterCode: starterCode || (type === 'coding' ? '// Write your code solution here\n' : ''),
+                options: options || [],
+                testCases: testCases || [],
+                createdBy: interview.interviewerId
+            });
+        }
 
-        // Notify any connected candidate immediately. The dashboard also emits
-        // this event for backwards compatibility with older clients.
+        // Add to interview questions list if not already present
+        if (!interview.questions.some(q => String(q) === String(question._id))) {
+            interview.questions.push(question._id);
+            await interview.save();
+        }
+
+        // Notify connected candidate immediately over WebSocket proctor namespace
         proctorNamespace.to(String(interview._id)).emit('question_assigned', question);
+        console.log(`[PROCTOR] Question "${question.title}" assigned to interview ${interview._id}`);
+
         res.json({ success: true, question });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
-});
+};
+
+app.post('/api/interviews/:id/ask-question', handleAssignQuestionToInterview);
+app.post('/api/interviews/:id/assign-question', handleAssignQuestionToInterview);
 
 // Update interviewer notes / rating / decision
 app.patch('/api/interviews/:id/notes', async (req, res) => {
@@ -459,6 +522,26 @@ app.get('/api/interviews/:id/logs', async (req, res) => {
     }
 });
 
+// Get all recent incidents across interviews for live monitoring audit drawer
+app.get('/api/incidents', async (req, res) => {
+    try {
+        const logs = await Log.find().sort({ timestamp: -1 }).limit(60);
+        res.json(logs.map(l => ({
+            id: l._id,
+            interviewId: String(l.interviewId),
+            roomId: String(l.interviewId),
+            candidateId: String(l.interviewId),
+            timestamp: l.timestamp,
+            event: l.anomalyType,
+            severity: l.severity,
+            confidence: l.confidence,
+            details: l.details
+        })));
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // Get interview details with questions
 app.get('/api/interviews/:id', async (req, res) => {
     try {
@@ -468,6 +551,87 @@ app.get('/api/interviews/:id', async (req, res) => {
             .populate('questions');
         if (!interview) return res.status(404).json({ error: 'Not found' });
         res.json(interview);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Post warning to candidate
+app.post('/api/interviews/:id/warning', async (req, res) => {
+    try {
+        const { message, warningType } = req.body;
+        const interview = await Interview.findById(req.params.id);
+        if (!interview) return res.status(404).json({ error: 'Interview not found' });
+
+        const log = await Log.create({
+            interviewId: interview._id,
+            anomalyType: warningType || 'PROCTOR_WARNING',
+            severity: 'medium',
+            confidence: 1.0,
+            details: message || 'Warning issued by proctor'
+        });
+
+        const alertData = {
+            roomId: String(interview._id),
+            event: 'PROCTOR_WARNING',
+            severity: 'medium',
+            details: message || 'Proctor warning issued',
+            message: message || 'Proctor warning issued',
+            timestamp: log.timestamp,
+            logId: log._id
+        };
+
+        if (typeof proctorNamespace !== 'undefined') {
+            proctorNamespace.to(String(interview._id)).emit('candidate_warning', alertData);
+            proctorNamespace.to(String(interview._id)).emit('proctor_alert', alertData);
+            proctorNamespace.emit('global_proctor_alert', alertData);
+        }
+
+        res.json({ success: true, log });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Flag incident manually
+app.post('/api/interviews/:id/incident', async (req, res) => {
+    try {
+        const { tag, severity = 'medium', details, penalty = 5 } = req.body;
+        const interview = await Interview.findById(req.params.id);
+        if (!interview) return res.status(404).json({ error: 'Interview not found' });
+
+        const log = await Log.create({
+            interviewId: interview._id,
+            anomalyType: tag || 'MANUAL_FLAG',
+            severity: severity,
+            confidence: 1.0,
+            details: details || `Manual incident flag: ${tag}`
+        });
+
+        const updatedScore = Math.max(0, (interview.trustScore || 100) - Number(penalty));
+        await Interview.findByIdAndUpdate(interview._id, { trustScore: updatedScore });
+
+        const alertData = {
+            roomId: String(interview._id),
+            event: tag || 'MANUAL_FLAG',
+            severity: severity,
+            confidence: 1.0,
+            details: details || `Flagged: ${tag}`,
+            timestamp: log.timestamp,
+            logId: log._id,
+            penalty
+        };
+
+        if (typeof proctorNamespace !== 'undefined') {
+            proctorNamespace.to(String(interview._id)).emit('proctor_alert', alertData);
+            proctorNamespace.to(String(interview._id)).emit('score_update', {
+                roomId: String(interview._id),
+                score: updatedScore
+            });
+            proctorNamespace.emit('global_proctor_alert', alertData);
+        }
+
+        res.json({ success: true, log, updatedScore });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -656,7 +820,7 @@ app.post('/api/run-code', async (req, res) => {
         const languageId = langMap[language] || 63;
 
         if (!JUDGE0_KEY) {
-            const GEMINI_KEY = configuredSecret('GEMINI_API_KEY');
+            const GEMINI_KEY = getGeminiKey();
             if (GEMINI_KEY) {
                 try {
                     const prompt = `You are a virtual code compiler, interpreter, and execution sandbox.
@@ -704,7 +868,7 @@ ${code}`;
                         return res.json(parsed);
                     }
                 } catch (geminiErr) {
-                    console.error('Gemini code execution simulation failed:', geminiErr);
+                    console.error('Gemini code execution simulation failed:', sanitizeError(geminiErr?.message || geminiErr, GEMINI_KEY));
                 }
             }
 
@@ -742,23 +906,40 @@ ${code}`;
     }
 });
 
-// ── AI Evaluation (Gemini) ────────────────────────────────────────────────────
+// ── AI Evaluation (Hybrid: Gemini 2.5 Flash if key present, Smart Synthesis Engine fallback) ──
 
 app.post('/api/ai/evaluate', async (req, res) => {
     try {
-        const { interviewId, submissions, questions } = req.body;
-        const GEMINI_KEY = configuredSecret('GEMINI_API_KEY');
+        const { interviewId, submissions = [], questions = [] } = req.body;
+        const GEMINI_KEY = getGeminiKey();
 
-        if (!GEMINI_KEY) {
-            return res.json({
-                success: false,
-                message: 'Gemini API key not configured. Add GEMINI_API_KEY to backend/.env',
-                evaluation: null
-            });
+        let interview = null;
+        let candidateName = 'Candidate';
+        let jobRole = 'Software Engineer';
+        let trustScore = 100;
+
+        if (interviewId) {
+            try {
+                interview = await Interview.findById(interviewId).populate('candidateId', 'username fullname');
+                if (interview) {
+                    candidateName = interview.candidateId?.fullname || interview.candidateId?.username || 'Candidate';
+                    jobRole = interview.jobRole || 'Software Engineer';
+                    trustScore = interview.trustScore !== undefined ? interview.trustScore : 100;
+                }
+            } catch {}
         }
 
-        const prompt = `You are an expert technical interviewer evaluating a software engineering candidate. 
+        let evaluation = null;
+
+        // 1. If Gemini key is configured, attempt live Google Gemini LLM evaluation
+        if (GEMINI_KEY) {
+            try {
+                const prompt = `You are an expert technical interviewer evaluating a software engineering candidate. 
 Evaluate the following code submissions objectively and return a JSON response.
+
+Candidate: ${candidateName}
+Role: ${jobRole}
+Session Integrity Score: ${trustScore}%
 
 Questions and Submissions:
 ${questions.map((q, i) => `
@@ -792,29 +973,46 @@ Return a JSON object with this exact structure:
   "weaknessAreas": ["..."]
 }`;
 
-        const geminiRes = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`,
-            {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    contents: [{ parts: [{ text: prompt }] }],
-                    generationConfig: { responseMimeType: 'application/json' }
-                })
+                const geminiRes = await fetch(
+                    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`,
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            contents: [{ parts: [{ text: prompt }] }],
+                            generationConfig: { responseMimeType: 'application/json' }
+                        })
+                    }
+                );
+
+                const geminiData = await geminiRes.json();
+                if (geminiRes.ok) {
+                    const text = geminiData.candidates?.[0]?.content?.parts?.[0]?.text;
+                    if (text) {
+                        evaluation = JSON.parse(text);
+                        evaluation.source = 'gemini';
+                    }
+                } else {
+                    console.warn('[AI-EVALUATE] Gemini API error, activating Smart Evaluation Engine fallback:', geminiData.error?.message);
+                }
+            } catch (geminiErr) {
+                console.warn('[AI-EVALUATE] Gemini request failed, activating Smart Evaluation Engine fallback:', sanitizeError(geminiErr?.message, GEMINI_KEY));
             }
-        );
-
-        const geminiData = await geminiRes.json();
-        if (!geminiRes.ok) {
-            throw new Error(geminiData.error?.message || 'Gemini evaluation request failed');
         }
-        const text = geminiData.candidates?.[0]?.content?.parts?.[0]?.text;
 
-        if (!text) throw new Error('Gemini returned no content');
+        // 2. Fallback to Smart Technical & Proctoring Evaluation Engine (Zero setup / Instant)
+        if (!evaluation) {
+            evaluation = generateSmartEvaluation({
+                interviewId,
+                submissions,
+                questions,
+                candidateName,
+                jobRole,
+                trustScore
+            });
+        }
 
-        const evaluation = JSON.parse(text);
-
-        // Save to DB
+        // Save evaluation to DB
         if (interviewId) {
             await Interview.findByIdAndUpdate(interviewId, {
                 aiEvaluation: JSON.stringify(evaluation.perQuestion),
@@ -823,28 +1021,24 @@ Return a JSON object with this exact structure:
             });
         }
 
-        res.json({ success: true, evaluation });
+        res.json({ success: true, source: evaluation.source || 'smart_synthesis_engine', evaluation });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        const sanitized = sanitizeError(err.message, configuredSecret('GEMINI_API_KEY'));
+        console.error('[AI-EVALUATE] Error:', sanitized);
+        res.status(500).json({ error: sanitized });
     }
 });
 
-// AI Question Generator
+// AI Question Generator (Hybrid: Gemini LLM if key is present, Smart Synthesis Engine fallback)
 app.post('/api/ai/generate-questions', async (req, res) => {
-    try {
-        const { jobRole, jobLevel, topics, count } = req.body;
-        const GEMINI_KEY = configuredSecret('GEMINI_API_KEY');
+    const { jobRole = 'Software Engineer', jobLevel = 'senior', topics = ['Algorithms', 'System Design'], count = 3 } = req.body || {};
+    const GEMINI_KEY = getGeminiKey();
 
-        if (!GEMINI_KEY) {
-            return res.json({
-                success: false,
-                message: 'Gemini API key not configured.',
-                questions: []
-            });
-        }
-
-        const prompt = `Generate ${count || 3} technical interview questions for a ${jobLevel || 'mid'}-level ${jobRole || 'Software Engineer'} position.
-Focus topics: ${topics?.join(', ') || 'data structures, algorithms, system design'}.
+    // 1. If Gemini key is configured, attempt live Google Gemini generation
+    if (GEMINI_KEY) {
+        try {
+            const prompt = `Generate ${count} technical interview questions for a ${jobLevel}-level ${jobRole} position.
+Focus topics: ${Array.isArray(topics) ? topics.join(', ') : topics}.
 
 Return a JSON array where each item has:
 {
@@ -857,70 +1051,202 @@ Return a JSON array where each item has:
   "tags": ["tag1", "tag2"]
 }`;
 
-        const geminiRes = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`,
-            {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    contents: [{ parts: [{ text: prompt }] }],
-                    generationConfig: { responseMimeType: 'application/json' }
-                })
-            }
-        );
+            const geminiRes = await fetch(
+                `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        contents: [{ parts: [{ text: prompt }] }],
+                        generationConfig: { responseMimeType: 'application/json' }
+                    })
+                }
+            );
 
-        const geminiData = await geminiRes.json();
-        if (!geminiRes.ok) {
-            throw new Error(geminiData.error?.message || 'Gemini question generation request failed');
+            const geminiData = await geminiRes.json();
+            if (geminiRes.ok) {
+                const text = geminiData.candidates?.[0]?.content?.parts?.[0]?.text;
+                if (text) {
+                    const questions = JSON.parse(text);
+                    return res.json({ success: true, source: 'gemini', questions });
+                }
+            } else {
+                console.warn('[AI-GENERATE] Gemini API returned error, activating Smart Question Engine fallback:', geminiData.error?.message);
+            }
+        } catch (err) {
+            console.warn('[AI-GENERATE] Gemini request failed, activating Smart Question Engine fallback:', sanitizeError(err.message, GEMINI_KEY));
         }
-        const text = geminiData.candidates?.[0]?.content?.parts?.[0]?.text;
-        const questions = JSON.parse(text);
-        res.json({ success: true, questions });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
+    }
+
+    // 2. Built-in Smart Synthesis Generator (Zero setup / Instant fallback)
+    try {
+        const questions = generateSmartQuestions({ jobRole, jobLevel, topics, count });
+        return res.json({
+            success: true,
+            source: 'smart_synthesis_engine',
+            questions
+        });
+    } catch (genErr) {
+        console.error('[AI-GENERATE] Question generation error:', genErr);
+        res.status(500).json({ success: false, error: 'Failed to generate questions' });
     }
 });
 
 // AI Interview Co-Pilot (get follow-up questions)
 app.post('/api/ai/suggest-followup', async (req, res) => {
     try {
-        const { question, candidateAnswer, jobRole } = req.body;
-        const GEMINI_KEY = configuredSecret('GEMINI_API_KEY');
+        const { question = 'Technical coding problem', candidateAnswer = '', jobRole = 'Software Engineer' } = req.body || {};
+        const GEMINI_KEY = getGeminiKey();
 
-        if (!GEMINI_KEY) {
-            return res.json({ success: false, suggestions: [] });
-        }
-
-        const prompt = `You are an expert technical interviewer. The candidate is applying for ${jobRole || 'Software Engineer'}.
+        // 1. If Gemini key is available, query Gemini
+        if (GEMINI_KEY) {
+            try {
+                const prompt = `You are an expert technical interviewer. The candidate is applying for ${jobRole || 'Software Engineer'}.
 
 Original Question: "${question}"
 Candidate's Answer: "${candidateAnswer}"
 
 Based on their answer, suggest 3 sharp follow-up questions to probe deeper. Return JSON array of strings.`;
 
+                const geminiRes = await fetch(
+                    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`,
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            contents: [{ parts: [{ text: prompt }] }],
+                            generationConfig: { responseMimeType: 'application/json' }
+                        })
+                    }
+                );
+
+                const geminiData = await geminiRes.json();
+                if (geminiRes.ok) {
+                    const text = geminiData.candidates?.[0]?.content?.parts?.[0]?.text;
+                    if (text) {
+                        const suggestions = JSON.parse(text);
+                        return res.json({ success: true, source: 'gemini', suggestions });
+                    }
+                }
+            } catch (gemErr) {
+                console.warn('[AI-FOLLOWUP] Gemini error, using smart synthesis fallback:', gemErr?.message);
+            }
+        }
+
+        // 2. Smart Synthesis Follow-up Generator (Zero setup / Instant)
+        const role = String(jobRole).toLowerCase();
+        const baseSuggestions = [
+            `Can you walk through your edge-case handling if the input scale increases to 10^7 elements?`,
+            `What is the theoretical Big-O time and space complexity of your current implementation, and could we trade memory to make it faster?`,
+            `How would you test this function in a CI/CD pipeline, and what mock fixtures or boundary inputs would you check?`
+        ];
+
+        if (role.includes('frontend') || role.includes('react')) {
+            baseSuggestions[1] = `How would you prevent unnecessary component re-renders or memoize this computation in React?`;
+        } else if (role.includes('backend') || role.includes('system')) {
+            baseSuggestions[1] = `How would you architect concurrency control or database transactions if multiple users execute this simultaneously?`;
+        }
+
+        res.json({
+            success: true,
+            source: 'smart_synthesis_engine',
+            suggestions: baseSuggestions
+        });
+    } catch (err) {
+        console.error('[AI-FOLLOWUP] Error:', err);
+        res.status(500).json({ error: 'Failed to generate follow-up suggestions' });
+    }
+});
+
+// ── Gemini Secure Server-Side Proxy & Status Routes ──────────────────────────
+
+// Status route: returns masked key and configuration state for admin/interviewer dashboard
+const handleAiStatus = (req, res) => {
+    const key = getGeminiKey();
+    res.json({
+        configured: Boolean(key),
+        provider: 'Google Gemini',
+        model: 'gemini-2.5-flash',
+        maskedKey: maskSecret(key)
+    });
+};
+app.get('/api/ai/status', handleAiStatus);
+app.get('/api/gemini/status', handleAiStatus);
+
+// Server-side proxy: executes arbitrary Gemini requests securely without leaking client keys
+const handleGeminiProxy = async (req, res) => {
+    const GEMINI_KEY = getGeminiKey();
+    if (!GEMINI_KEY) {
+        return res.status(503).json({
+            success: false,
+            error: 'Gemini AI API key not configured on server. Add GEMINI_API_KEY to backend/.env or Render environment variables'
+        });
+    }
+
+    try {
+        const {
+            model = 'gemini-2.5-flash',
+            contents,
+            prompt,
+            generationConfig,
+            systemInstruction
+        } = req.body || {};
+
+        let payloadContents = contents;
+        if (!payloadContents && prompt) {
+            payloadContents = [{ parts: [{ text: String(prompt) }] }];
+        }
+
+        if (!payloadContents || !Array.isArray(payloadContents)) {
+            return res.status(400).json({
+                success: false,
+                error: 'Invalid request body. Expected "prompt" string or "contents" array.'
+            });
+        }
+
+        const safeModel = String(model).replace(/[^a-zA-Z0-9._-]/g, '') || 'gemini-2.5-flash';
+        const requestPayload = { contents: payloadContents };
+
+        if (generationConfig && typeof generationConfig === 'object') {
+            requestPayload.generationConfig = generationConfig;
+        }
+        if (systemInstruction) {
+            requestPayload.systemInstruction = typeof systemInstruction === 'string'
+                ? { parts: [{ text: systemInstruction }] }
+                : systemInstruction;
+        }
+
         const geminiRes = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`,
+            `https://generativelanguage.googleapis.com/v1beta/models/${safeModel}:generateContent?key=${GEMINI_KEY}`,
             {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    contents: [{ parts: [{ text: prompt }] }],
-                    generationConfig: { responseMimeType: 'application/json' }
-                })
+                body: JSON.stringify(requestPayload)
             }
         );
 
         const geminiData = await geminiRes.json();
         if (!geminiRes.ok) {
-            throw new Error(geminiData.error?.message || 'Gemini follow-up request failed');
+            const rawMsg = geminiData.error?.message || 'Gemini proxy request failed';
+            throw new Error(sanitizeError(rawMsg, GEMINI_KEY));
         }
-        const text = geminiData.candidates?.[0]?.content?.parts?.[0]?.text;
-        const suggestions = JSON.parse(text);
-        res.json({ success: true, suggestions });
+
+        const candidateText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        res.json({
+            success: true,
+            model: safeModel,
+            text: candidateText,
+            raw: geminiData
+        });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        const sanitized = sanitizeError(err.message, GEMINI_KEY);
+        console.error('[AI-PROXY] Error:', sanitized);
+        res.status(500).json({ success: false, error: sanitized });
     }
-});
+};
+
+app.post('/api/ai/proxy', handleGeminiProxy);
+app.post('/api/gemini', handleGeminiProxy);
 
 // ─── WebSocket Namespaces ─────────────────────────────────────────────────────
 
@@ -1061,9 +1387,93 @@ proctorNamespace.on('connection', (socket) => {
                 score: updatedInterview.trustScore
             });
 
+            // Global alert for interviewer monitoring feed
+            proctorNamespace.emit('global_proctor_alert', {
+                ...data, logId: newLog._id, timestamp: newLog.timestamp,
+                candidateId: interview.candidateId,
+                trustScore: updatedInterview.trustScore
+            });
+
             console.log(`[PROCTOR] Anomaly: ${data.event} (${data.severity}) — Trust: ${updatedInterview.trustScore}`);
         } catch (err) {
             console.error('[PROCTOR] Error processing anomaly:', err.message);
+        }
+    });
+
+    socket.on('send_warning', async (data) => {
+        try {
+            const { roomId, message, warningType } = data || {};
+            if (!roomId) return;
+            const interview = await Interview.findById(roomId);
+            if (!interview) return;
+
+            const newLog = await Log.create({
+                interviewId: interview._id,
+                anomalyType: warningType || 'PROCTOR_WARNING',
+                severity: 'medium',
+                confidence: 1.0,
+                details: message || 'Warning issued by proctor'
+            });
+
+            const alertData = {
+                roomId: String(roomId),
+                event: 'PROCTOR_WARNING',
+                severity: 'medium',
+                details: message || 'Proctor warning issued',
+                message: message || 'Proctor warning issued',
+                timestamp: newLog.timestamp,
+                logId: newLog._id,
+                candidateId: interview.candidateId
+            };
+
+            proctorNamespace.to(String(roomId)).emit('candidate_warning', alertData);
+            proctorNamespace.to(String(roomId)).emit('proctor_alert', alertData);
+            proctorNamespace.emit('global_proctor_alert', alertData);
+            console.log(`[PROCTOR] Warning sent to room ${roomId}: ${message}`);
+        } catch (err) {
+            console.error('[PROCTOR] Error in send_warning:', err.message);
+        }
+    });
+
+    socket.on('flag_incident', async (data) => {
+        try {
+            const { roomId, tag, severity = 'medium', details, penalty = 5 } = data || {};
+            if (!roomId) return;
+            const interview = await Interview.findById(roomId);
+            if (!interview) return;
+
+            const newLog = await Log.create({
+                interviewId: interview._id,
+                anomalyType: tag || 'MANUAL_FLAG',
+                severity,
+                confidence: 1.0,
+                details: details || `Manual incident flag: ${tag}`
+            });
+
+            const updatedScore = Math.max(0, (interview.trustScore || 100) - Number(penalty));
+            await Interview.findByIdAndUpdate(interview._id, { trustScore: updatedScore });
+
+            const alertData = {
+                roomId: String(roomId),
+                event: tag || 'MANUAL_FLAG',
+                severity,
+                details: details || `Flagged: ${tag}`,
+                timestamp: newLog.timestamp,
+                logId: newLog._id,
+                penalty,
+                candidateId: interview.candidateId,
+                trustScore: updatedScore
+            };
+
+            proctorNamespace.to(String(roomId)).emit('proctor_alert', alertData);
+            proctorNamespace.to(String(roomId)).emit('score_update', {
+                roomId: String(roomId),
+                score: updatedScore
+            });
+            proctorNamespace.emit('global_proctor_alert', alertData);
+            console.log(`[PROCTOR] Incident flagged in room ${roomId}: ${tag} (-${penalty})`);
+        } catch (err) {
+            console.error('[PROCTOR] Error in flag_incident:', err.message);
         }
     });
 
@@ -1238,12 +1648,12 @@ app.post('/api/proctor/analyze-frame', async (req, res) => {
             return res.status(400).json({ error: 'Image data is required' });
         }
 
-        const GEMINI_KEY = configuredSecret('GEMINI_API_KEY');
+        const GEMINI_KEY = getGeminiKey();
         if (!GEMINI_KEY) {
             return res.json({
                 hasGemini: false,
                 analyzed: false,
-                message: 'Gemini API key not configured in .env'
+                message: 'Gemini API key not configured. Please add GEMINI_API_KEY to your backend environment variables (Render Dashboard or backend/.env).'
             });
         }
 
@@ -1514,13 +1924,16 @@ Respond with JSON:
 
         res.json({ success: true, hasGemini: true, analyzed: true, result });
     } catch (err) {
-        console.error('[PROCTOR-FRAME] Error:', err.message);
-        res.status(500).json({ error: err.message });
+        const sanitized = sanitizeError(err.message, getGeminiKey());
+        console.error('[PROCTOR-FRAME] Error:', sanitized);
+        res.status(500).json({ error: sanitized });
     }
 });
 
 // ─── Start Server ─────────────────────────────────────────────────────────────
 server.listen(PORT, () => {
+    const geminiKey = getGeminiKey();
     console.log(`🚀 ProctorAI Backend v2.0 running on port ${PORT}`);
     console.log(`   API: http://localhost:${PORT}`);
+    console.log(`   Gemini AI: ${geminiKey ? `Active (Masked: ${maskSecret(geminiKey)})` : 'Not configured (Mock / heuristic fallback active)'}`);
 });
