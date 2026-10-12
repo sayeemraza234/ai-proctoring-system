@@ -495,14 +495,7 @@ export default function App() {
         role: 'candidate',
         interview_id: params.get('interview') || params.get('interviewId')
       });
-      if (
-        viewParam === 'kiosk' || viewParam === 'session' || viewParam === 'exam' ||
-        path.includes('/candidate/session') || path.includes('/candidate/exam')
-      ) {
-        setView('candidate_kiosk');
-      } else {
-        setView('candidate');
-      }
+      setView('candidate');
     }
   }, []);
 
@@ -640,30 +633,12 @@ export default function App() {
   };
 
   // ── Candidate Session Launch Handlers ──────────────────────────────────────
-  const handleEnterWebKiosk = async () => {
-    try {
-      if (document.documentElement.requestFullscreen) {
-        await document.documentElement.requestFullscreen().catch(() => {});
-      } else if (document.documentElement.webkitRequestFullscreen) {
-        await document.documentElement.webkitRequestFullscreen().catch(() => {});
-      }
-    } catch (e) {}
-    setLaunchStatus('idle');
-    setView('candidate_kiosk');
-  };
-
   const handleLaunchSession = () => {
     setLaunchStatus('attempting');
 
     const usernameParam = encodeURIComponent(currentUser?.username || '');
     const interviewParam = encodeURIComponent(currentUser?.interview_id || currentUser?.interviewId || '');
     const deepLinkUrl = `proctorai://start-exam?username=${usernameParam}&role=candidate&interviewId=${interviewParam}`;
-
-    let appDetected = false;
-    const onBlur = () => {
-      appDetected = true;
-    };
-    window.addEventListener('blur', onBlur, { once: true });
 
     // Attempt custom deep-link protocol via hidden iframe (clean, avoids unhandled navigation errors)
     try {
@@ -678,14 +653,8 @@ export default function App() {
       window.location.href = deepLinkUrl;
     }
 
-    // Fallback timer (2.5 seconds): if desktop protocol is not handled or window stays focused,
-    // seamlessly transition directly into the In-Browser Secure Kiosk mode!
     setTimeout(() => {
-      window.removeEventListener('blur', onBlur);
-      if (!appDetected) {
-        console.log('[LAUNCH] Desktop protocol not triggered. Transitioning to web-based kiosk.');
-        handleEnterWebKiosk();
-      }
+      setLaunchStatus('launched');
     }, 2500);
   };
 
@@ -1705,7 +1674,7 @@ export default function App() {
             </div>
             <h2 style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-primary)', margin: '0 0 8px' }}>Candidate Session Ready</h2>
             <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6, margin: '0 0 20px' }}>
-              Your secure exam terminal is linked. For full kiosk security and environment lockdown, launch via the ProctorAI Desktop App or enter directly in-browser below.
+              Your secure exam terminal is linked. For full kiosk security and environment lockdown, launch and complete your assessment using the ProctorAI Desktop App.
             </p>
 
             {launchStatus === 'attempting' && (
@@ -1715,7 +1684,18 @@ export default function App() {
                 color: 'var(--primary)', fontSize: 12, fontWeight: 600, marginBottom: 16
               }}>
                 <span className="spinner" style={{ width: 14, height: 14 }} />
-                <span>Checking for Desktop App... Starting in-browser kiosk in 2s.</span>
+                <span>Launching ProctorAI Desktop App...</span>
+              </div>
+            )}
+
+            {launchStatus === 'launched' && (
+              <div style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                padding: '10px 14px', background: 'rgba(16, 185, 129, 0.1)', borderRadius: 8,
+                color: '#10b981', fontSize: 12, fontWeight: 600, marginBottom: 16
+              }}>
+                <Check size={14} />
+                <span>Launch command sent. If the desktop app didn't open automatically, please open the ProctorAI Desktop App on your PC.</span>
               </div>
             )}
 
@@ -1727,15 +1707,7 @@ export default function App() {
                 style={{ width: '100%' }}
               >
                 <Terminal size={14} />
-                <span>{launchStatus === 'attempting' ? 'Detecting Desktop App...' : 'Launch ProctorAI Desktop Kiosk'}</span>
-              </button>
-              <button
-                onClick={handleEnterWebKiosk}
-                className="btn btn-secondary w-full"
-                style={{ width: '100%' }}
-              >
-                <Maximize2 size={14} />
-                <span>Enter In-Browser Secure Kiosk</span>
+                <span>{launchStatus === 'attempting' ? 'Launching Desktop App...' : 'Launch ProctorAI Desktop Kiosk'}</span>
               </button>
               <button
                 onClick={handleLogout}
