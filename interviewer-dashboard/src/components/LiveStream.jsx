@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { io } from 'socket.io-client';
 import {
   Camera, CameraOff, Maximize2, Minimize2, Mic, MicOff,
-  SwitchCamera, Radio, Volume2, User, Monitor, Wifi
+  SwitchCamera, Radio, Volume2, User, Monitor, Wifi, Users, Code
 } from 'lucide-react';
 
 const BACKEND = import.meta.env.VITE_BACKEND_URL
@@ -29,7 +29,9 @@ const LiveStream = ({
   compact = false,
   onStartCall = null,
   activeStreamSource = 'webcam',
-  onToggleStreamSource = null
+  onToggleStreamSource = null,
+  interviewMode: controlledMode,
+  onInterviewModeChange = null
 }) => {
   const videoRef = useRef(null);
   const containerRef = useRef(null);
@@ -49,6 +51,11 @@ const LiveStream = ({
   const [isSwapped, setIsSwapped] = useState(false);
   const [interviewerStarted, setInterviewerStarted] = useState(false);
   const [currentStreamSource, setCurrentStreamSource] = useState(activeStreamSource);
+  const [interviewMode, setInterviewMode] = useState(controlledMode || 'exam');
+
+  useEffect(() => {
+    if (controlledMode) setInterviewMode(controlledMode);
+  }, [controlledMode]);
 
   useEffect(() => {
     setCurrentStreamSource(activeStreamSource);
@@ -62,7 +69,35 @@ const LiveStream = ({
     }
   };
 
-  // Capture local interviewer webcam for 2-way interview
+  // Helper to ensure interviewer camera & microphone are acquired
+  const ensureLocalMedia = async () => {
+    if (localStream) return localStream;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      setLocalStream(stream);
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = stream;
+        localVideoRef.current.play().catch(() => {});
+      }
+      return stream;
+    } catch (err) {
+      console.warn('[INTERVIEWER] Audio+video capture error, falling back to video-only:', err);
+      try {
+        const vStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        setLocalStream(vStream);
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = vStream;
+          localVideoRef.current.play().catch(() => {});
+        }
+        return vStream;
+      } catch (e) {
+        console.warn('[INTERVIEWER] Camera access denied:', e);
+        return null;
+      }
+    }
+  };
+
+  // Capture local interviewer webcam for 2-way interview on mount
   useEffect(() => {
     let activeLocalStream = null;
     navigator.mediaDevices.getUserMedia({ video: true, audio: true })
@@ -71,6 +106,7 @@ const LiveStream = ({
         activeLocalStream = stream;
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = stream;
+          localVideoRef.current.play().catch(() => {});
         }
       })
       .catch(err => {
@@ -79,7 +115,10 @@ const LiveStream = ({
           .then(vStream => {
             setLocalStream(vStream);
             activeLocalStream = vStream;
-            if (localVideoRef.current) localVideoRef.current.srcObject = vStream;
+            if (localVideoRef.current) {
+              localVideoRef.current.srcObject = vStream;
+              localVideoRef.current.play().catch(() => {});
+            }
           }).catch(() => {});
       });
 
@@ -90,9 +129,19 @@ const LiveStream = ({
     };
   }, []);
 
+  // Robust callback ref for local video node
+  const setLocalVideoNode = useCallback((node) => {
+    localVideoRef.current = node;
+    if (node && localStream) {
+      node.srcObject = localStream;
+      node.play().catch(() => {});
+    }
+  }, [localStream]);
+
   useEffect(() => {
     if (localVideoRef.current && localStream) {
       localVideoRef.current.srcObject = localStream;
+      localVideoRef.current.play().catch(() => {});
     }
   }, [localStream]);
 
@@ -130,10 +179,57 @@ const LiveStream = ({
     }
   };
 
-  const startInterview = () => {
-    if (!socketRef.current || !roomId) return;
-    socketRef.current.emit('interviewer_started', { roomId: String(roomId), interviewerName });
+  const handleSetInterviewMode = (newMode) => {
+    setInterviewMode(newMode);
+    if (socketRef.current && roomId) {
+      socketRef.current.emit('call_action', {
+        roomId: String(roomId),
+        action: 'interview_mode',
+        mode: newMode
+      });
+    }
+    if (onInterviewModeChange) {
+      onInterviewModeChange(newMode);
+    }
+    if (newMode === 'face_to_face' && !interviewerStarted) {
+      startInterview();
+    }
+  };
+
+  const startInterview = async () => {
+    let stream = localStream;
+    if (!stream) {
+      stream = await ensureLocalMedia();
+    }
     setInterviewerStarted(true);
+    if (socketRef.current && roomId) {
+      socketRef.current.emit('interviewer_started', {
+        roomId: String(roomId),
+        interviewerName
+      });
+      socketRef.current.emit('call_action', {
+        roomId: String(roomId),
+        action: 'interview_mode',
+        mode: interviewMode
+      });
+    }
+    if (peerRef.current && stream) {
+      try {
+        const existingTrackIds = new Set(peerRef.current.getSenders().map(s => s.track?.id).filter(Boolean));
+        stream.getTracks().forEach(track => {
+          if (!existingTrackIds.has(track.id)) {
+            peerRef.current.addTrack(track, stream);
+          }
+        });
+        const offer = await peerRef.current.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: true });
+        await peerRef.current.setLocalDescription(offer);
+        socketRef.current?.emit('offer', { roomId: String(roomId), signal: offer });
+      } catch (err) {
+        console.warn('[INTERVIEWER-RTC] Offer error on startInterview:', err);
+      }
+    } else if (socketRef.current) {
+      socketRef.current.emit('peer_present');
+    }
     if (onStartCall) onStartCall();
   };
 
@@ -261,6 +357,14 @@ const LiveStream = ({
           }
         };
         img.src = data.image;
+      }
+    });
+
+    // Remote call_action listener (Mode sync)
+    socket.on('call_action', (data) => {
+      if ((data?.action === 'interview_mode' || data?.action === 'set_mode') && (data.mode === 'face_to_face' || data.mode === 'exam')) {
+        setInterviewMode(data.mode);
+        if (onInterviewModeChange) onInterviewModeChange(data.mode);
       }
     });
 
@@ -398,6 +502,62 @@ const LiveStream = ({
               <span>Start Interview Broadcast</span>
             </button>
           )}
+
+          {/* Interviewer Mode Switcher: Face-to-Face vs Exam Mode */}
+          <div style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            background: 'rgba(255, 255, 255, 0.06)',
+            border: '1px solid rgba(255, 255, 255, 0.12)',
+            borderRadius: 7,
+            padding: 2,
+            gap: 2
+          }}>
+            <button
+              type="button"
+              onClick={() => handleSetInterviewMode('face_to_face')}
+              className={`btn btn-sm ${interviewMode === 'face_to_face' ? 'btn-primary' : 'btn-ghost'}`}
+              style={{
+                padding: '3px 9px',
+                fontSize: 11,
+                fontWeight: 600,
+                borderRadius: 5,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                background: interviewMode === 'face_to_face' ? '#6366f1' : 'transparent',
+                color: interviewMode === 'face_to_face' ? '#ffffff' : 'var(--text-muted)',
+                border: 'none',
+                cursor: 'pointer'
+              }}
+              title="Switch interview to Face-to-Face Mode (2-way live video conversation)"
+            >
+              <Users size={12} />
+              <span>Face-to-Face Mode</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleSetInterviewMode('exam')}
+              className={`btn btn-sm ${interviewMode === 'exam' ? 'btn-primary' : 'btn-ghost'}`}
+              style={{
+                padding: '3px 9px',
+                fontSize: 11,
+                fontWeight: 600,
+                borderRadius: 5,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                background: interviewMode === 'exam' ? '#334155' : 'transparent',
+                color: interviewMode === 'exam' ? '#ffffff' : 'var(--text-muted)',
+                border: 'none',
+                cursor: 'pointer'
+              }}
+              title="Switch candidate to Exam / Coding Mode"
+            >
+              <Code size={12} />
+              <span>Exam Mode</span>
+            </button>
+          </div>
 
           <button
             onClick={toggleMute}
@@ -593,7 +753,7 @@ const LiveStream = ({
         )}
 
         {/* Local PiP Interviewer Video (Always bounded in bottom-right) */}
-        {localStream && (
+        {(localStream || interviewerStarted) && (
           <div
             className={`absolute overflow-hidden shadow-2xl ${
               isSwapped
@@ -617,7 +777,7 @@ const LiveStream = ({
             }}
           >
             <video
-              ref={localVideoRef}
+              ref={setLocalVideoNode}
               autoPlay
               muted
               playsInline
@@ -628,9 +788,25 @@ const LiveStream = ({
                 objectFit: 'cover',
                 objectPosition: 'center',
                 background: '#0f172a',
-                display: isVideoOff ? 'none' : 'block'
+                display: isVideoOff ? 'none' : (localStream ? 'block' : 'none')
               }}
             />
+            {!localStream && !isVideoOff && (
+              <div style={{
+                width: '100%',
+                height: '100%',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: '#0f172a',
+                color: 'var(--text-muted)',
+                gap: 4
+              }}>
+                <Radio size={16} className="animate-pulse" style={{ color: '#818cf8' }} />
+                <span style={{ fontSize: 9 }}>Starting camera...</span>
+              </div>
+            )}
             {isVideoOff && (
               <div style={{
                 width: '100%',

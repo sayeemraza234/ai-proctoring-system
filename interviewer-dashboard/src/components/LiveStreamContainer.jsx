@@ -26,7 +26,9 @@ export default function LiveStreamContainer({
   height,
   isFocused = false,
   layoutMode = 'split',
-  onToggleStreamSource
+  onToggleStreamSource,
+  interviewMode,
+  onInterviewModeChange
 }) {
   const [activeStreamSource, setActiveStreamSource] = useState(streamType);
   const [isMuted, setIsMuted] = useState(false);
@@ -164,6 +166,8 @@ export default function LiveStreamContainer({
               compact={false}
               activeStreamSource={activeStreamSource}
               onToggleStreamSource={handleToggleStream}
+              interviewMode={interviewMode}
+              onInterviewModeChange={onInterviewModeChange}
             />
           </div>
         )

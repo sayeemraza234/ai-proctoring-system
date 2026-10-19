@@ -5,7 +5,7 @@ import {
   Minimize2, Clock, AlertTriangle, CheckCircle, XCircle, Code,
   Play, Send, LogOut, Lock, RefreshCw, AlertOctagon,
   ChevronRight, ChevronLeft, Eye, EyeOff, Award, Check, Sparkles,
-  Activity, Sliders, Cpu, Radio
+  Activity, Sliders, Cpu, Radio, Users, Volume2, Video
 } from 'lucide-react';
 import { ProctorAiEngine } from '../utils/proctorAiEngine';
 
@@ -50,6 +50,15 @@ export default function CandidateExamKiosk({ currentUser, onExit }) {
   const [camActive, setCamActive] = useState(false);
   const [camError, setCamError] = useState(null);
 
+  // ── Interview Mode & Remote Stream State ─────────────────────────────────
+  const [interviewMode, setInterviewMode] = useState('exam'); // 'exam' | 'face_to_face'
+  const [isInterviewerBroadcastActive, setIsInterviewerBroadcastActive] = useState(false);
+  const [interviewerStream, setInterviewerStream] = useState(null);
+  const [interviewerRelayImage, setInterviewerRelayImage] = useState(null);
+  const [interviewerName, setInterviewerName] = useState('Interviewer');
+  const [pipMinimized, setPipMinimized] = useState(false);
+  const [audioBlocked, setAudioBlocked] = useState(false);
+
   // ── Pre-Trained AI Proctoring State ─────────────────────────────────────────
   const [aiLoading, setAiLoading] = useState({
     status: 'loading',
@@ -74,6 +83,99 @@ export default function CandidateExamKiosk({ currentUser, onExit }) {
   const signalingSocketRef = useRef(null);
   const rtcPeerRef = useRef(null);
   const aiEngineRef = useRef(null);
+
+  // Dedicated remote & stage refs
+  const interviewerVideoRef = useRef(null);
+  const interviewerRelayCanvasRef = useRef(null);
+  const interviewerStreamRef = useRef(null);
+  const candidateStageVideoRef = useRef(null);
+
+  // Callback ref for remote interviewer video element
+  const setInterviewerVideoNode = useCallback((node) => {
+    interviewerVideoRef.current = node;
+    if (node) {
+      node.muted = false;
+      if (interviewerStreamRef.current) {
+        node.srcObject = interviewerStreamRef.current;
+        node.play().then(() => {
+          setAudioBlocked(false);
+        }).catch(e => {
+          console.warn('[KIOSK] Remote audio/video play requires user interaction:', e);
+          if (e.name === 'NotAllowedError') setAudioBlocked(true);
+        });
+      }
+    }
+  }, []);
+
+  // Callback ref for candidate stage preview in Face-to-Face mode
+  const setCandidateStageVideoNode = useCallback((node) => {
+    candidateStageVideoRef.current = node;
+    if (node && localStreamRef.current) {
+      node.srcObject = localStreamRef.current;
+      node.play().catch(() => {});
+    }
+  }, []);
+
+  // Re-attach interviewer stream whenever interviewerStream changes
+  useEffect(() => {
+    if (interviewerVideoRef.current && interviewerStream) {
+      interviewerVideoRef.current.muted = false;
+      interviewerVideoRef.current.srcObject = interviewerStream;
+      interviewerVideoRef.current.play().then(() => {
+        setAudioBlocked(false);
+      }).catch(e => {
+        console.warn('[KIOSK] Remote video play error:', e);
+        if (e.name === 'NotAllowedError') setAudioBlocked(true);
+      });
+    }
+  }, [interviewerStream]);
+
+  // Keep candidate stage video synced whenever localStream becomes active
+  useEffect(() => {
+    if (candidateStageVideoRef.current && localStreamRef.current) {
+      candidateStageVideoRef.current.srcObject = localStreamRef.current;
+      candidateStageVideoRef.current.play().catch(() => {});
+    }
+  }, [camActive]);
+
+  // Keep socket relay canvas painted when new image frame arrives
+  useEffect(() => {
+    if (interviewerRelayImage && interviewerRelayCanvasRef.current) {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = interviewerRelayCanvasRef.current;
+        if (canvas) {
+          const ctx = canvas.getContext('2d');
+          canvas.width = img.width;
+          canvas.height = img.height;
+          ctx.drawImage(img, 0, 0);
+        }
+      };
+      img.src = interviewerRelayImage;
+    }
+  }, [interviewerRelayImage]);
+
+  const handleSwitchMode = (mode) => {
+    setInterviewMode(mode);
+    if (signalingSocketRef.current && interviewId) {
+      signalingSocketRef.current.emit('call_action', {
+        roomId: String(interviewId),
+        action: 'interview_mode',
+        mode
+      });
+    }
+    if (interviewerVideoRef.current) {
+      interviewerVideoRef.current.muted = false;
+      interviewerVideoRef.current.play().then(() => setAudioBlocked(false)).catch(() => {});
+    }
+  };
+
+  const handleUnmuteAudio = () => {
+    if (interviewerVideoRef.current) {
+      interviewerVideoRef.current.muted = false;
+      interviewerVideoRef.current.play().then(() => setAudioBlocked(false)).catch(() => {});
+    }
+  };
 
   // ── Fullscreen Request & Listener ──────────────────────────────────────────
   const ensureFullscreen = useCallback(async () => {
@@ -356,6 +458,36 @@ export default function CandidateExamKiosk({ currentUser, onExit }) {
 
       stream.getTracks().forEach(track => pc.addTrack(track, stream));
 
+      pc.ontrack = (event) => {
+        console.log('[KIOSK-RTC] Incoming remote interviewer track:', event.track.kind);
+        let remoteStream = event.streams[0];
+        if (!remoteStream) {
+          if (!interviewerStreamRef.current) {
+            interviewerStreamRef.current = new MediaStream();
+          }
+          interviewerStreamRef.current.addTrack(event.track);
+          remoteStream = interviewerStreamRef.current;
+        } else {
+          interviewerStreamRef.current = remoteStream;
+        }
+        setInterviewerStream(remoteStream);
+        setIsInterviewerBroadcastActive(true);
+        if (interviewerVideoRef.current) {
+          interviewerVideoRef.current.srcObject = remoteStream;
+          interviewerVideoRef.current.play().then(() => setAudioBlocked(false)).catch(e => {
+            console.warn('[KIOSK] Remote video/audio play waiting for user interaction:', e);
+            if (e.name === 'NotAllowedError') setAudioBlocked(true);
+          });
+        }
+      };
+
+      pc.onconnectionstatechange = () => {
+        if (pc.connectionState === 'connected') {
+          console.log('[KIOSK-RTC] WebRTC connection established with interviewer');
+          setIsInterviewerBroadcastActive(true);
+        }
+      };
+
       pc.onicecandidate = (event) => {
         if (event.candidate) {
           sigSocket.emit('ice_candidate', {
@@ -389,6 +521,39 @@ export default function CandidateExamKiosk({ currentUser, onExit }) {
       sigSocket.on('ice_candidate', async (data) => {
         if (data.candidate) {
           try { await pc.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch {}
+        }
+      });
+
+      sigSocket.on('interviewer_started', (data) => {
+        console.log('[KIOSK-RTC] Interviewer started broadcast:', data);
+        setIsInterviewerBroadcastActive(true);
+        if (data?.interviewerName) setInterviewerName(data.interviewerName);
+      });
+
+      sigSocket.on('call_action', (data) => {
+        console.log('[KIOSK-RTC] Remote call_action received:', data);
+        if ((data?.action === 'interview_mode' || data?.action === 'set_mode') && (data.mode === 'face_to_face' || data.mode === 'exam')) {
+          setInterviewMode(data.mode);
+        }
+      });
+
+      sigSocket.on('remote_frame', (data) => {
+        if (data && data.role === 'interviewer' && data.image) {
+          setIsInterviewerBroadcastActive(true);
+          setInterviewerRelayImage(data.image);
+          if (interviewerRelayCanvasRef.current) {
+            const img = new Image();
+            img.onload = () => {
+              const canvas = interviewerRelayCanvasRef.current;
+              if (canvas) {
+                const ctx = canvas.getContext('2d');
+                canvas.width = img.width;
+                canvas.height = img.height;
+                ctx.drawImage(img, 0, 0);
+              }
+            };
+            img.src = data.image;
+          }
         }
       });
     } catch (err) {
@@ -498,6 +663,18 @@ export default function CandidateExamKiosk({ currentUser, onExit }) {
     pSocket.on('interview_terminated', (data) => {
       alert(`The interview was ended by the interviewer: ${data.reason || 'Concluded.'}`);
       setIsSubmitted(true);
+    });
+
+    pSocket.on('interviewer_started', (data) => {
+      console.log('[KIOSK-PROCTOR] Interviewer started broadcast:', data);
+      setIsInterviewerBroadcastActive(true);
+      if (data?.interviewerName) setInterviewerName(data.interviewerName);
+    });
+
+    pSocket.on('call_action', (data) => {
+      if ((data?.action === 'interview_mode' || data?.action === 'set_mode') && (data.mode === 'face_to_face' || data.mode === 'exam')) {
+        setInterviewMode(data.mode);
+      }
     });
 
     // Fetch assigned questions for this specific interview session
@@ -790,6 +967,30 @@ export default function CandidateExamKiosk({ currentUser, onExit }) {
             </div>
           </div>
 
+          {/* Interviewer Mode Switcher (Candidate local toggle / remote sync) */}
+          <button
+            type="button"
+            onClick={() => handleSwitchMode(interviewMode === 'face_to_face' ? 'exam' : 'face_to_face')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '6px 12px',
+              borderRadius: 8,
+              background: interviewMode === 'face_to_face' ? 'rgba(99, 102, 241, 0.25)' : 'rgba(255, 255, 255, 0.06)',
+              border: `1px solid ${interviewMode === 'face_to_face' ? '#6366f1' : 'rgba(255, 255, 255, 0.12)'}`,
+              color: interviewMode === 'face_to_face' ? '#a5b4fc' : '#e4e4e7',
+              fontSize: 11,
+              fontWeight: 700,
+              cursor: 'pointer',
+              transition: 'all 0.15s ease'
+            }}
+            title={interviewMode === 'face_to_face' ? 'Switch back to Exam Mode' : 'Switch to Face-to-Face Mode'}
+          >
+            {interviewMode === 'face_to_face' ? <Users size={13} style={{ color: '#818cf8' }} /> : <Code size={13} />}
+            <span>{interviewMode === 'face_to_face' ? 'Face-to-Face' : 'Exam Mode'}</span>
+          </button>
+
           {/* Submit Action */}
           <button
             onClick={handleSubmitExam}
@@ -1065,201 +1266,731 @@ export default function CandidateExamKiosk({ currentUser, onExit }) {
           </div>
         </aside>
 
-        {/* Center: Question Workspace */}
+        {/* Center: Question Workspace / Face-to-Face Stage */}
         <main style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#0a0a0f', overflowY: 'auto', padding: 24 }}>
-          {activeQuestion ? (
-            <div style={{ maxWidth: 960, width: '100%', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 20 }}>
-              {/* Question Header */}
+          {interviewMode === 'face_to_face' ? (
+            /* ── MODE A: FACE-TO-FACE INTERVIEW STAGE ────────────────────── */
+            <div style={{ maxWidth: 1200, width: '100%', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 20 }}>
+              {/* Stage Header Banner */}
               <div style={{
-                background: '#12121a', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 12, padding: 24
+                background: 'linear-gradient(90deg, rgba(30, 27, 75, 0.6) 0%, rgba(15, 23, 42, 0.8) 100%)',
+                border: '1px solid rgba(99, 102, 241, 0.35)',
+                borderRadius: 14,
+                padding: '16px 22px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: 12
               }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <span style={{
-                      background: 'rgba(99, 102, 241, 0.2)', color: '#818cf8',
-                      padding: '4px 10px', borderRadius: 6, fontSize: 12, fontWeight: 700
-                    }}>
-                      Question {currentQIndex + 1} of {questions.length}
-                    </span>
-                    <span style={{
-                      background: activeQuestion.difficulty === 'hard' ? 'rgba(239,68,68,0.2)' : activeQuestion.difficulty === 'easy' ? 'rgba(16,185,129,0.2)' : 'rgba(245,158,11,0.2)',
-                      color: activeQuestion.difficulty === 'hard' ? '#ef4444' : activeQuestion.difficulty === 'easy' ? '#10b981' : '#f59e0b',
-                      padding: '4px 10px', borderRadius: 6, fontSize: 11, fontWeight: 700, textTransform: 'capitalize'
-                    }}>
-                      {activeQuestion.difficulty || 'Medium'}
-                    </span>
-                    <span style={{ fontSize: 12, color: '#a1a1aa' }}>
-                      Topic: <strong>{activeQuestion.topic || 'General'}</strong>
-                    </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <div style={{
+                    width: 38,
+                    height: 38,
+                    borderRadius: '50%',
+                    background: 'rgba(99, 102, 241, 0.2)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#818cf8',
+                    border: '1px solid rgba(99, 102, 241, 0.4)'
+                  }}>
+                    <Users size={20} />
                   </div>
-
-                  <div style={{ fontSize: 12, color: '#71717a' }}>
-                    Type: <strong style={{ color: '#e4e4e7' }}>{activeQuestion.type || 'Coding'}</strong>
+                  <div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <h2 style={{ fontSize: 16, fontWeight: 700, color: '#ffffff', margin: 0 }}>
+                        Live Face-to-Face Interview Stage
+                      </h2>
+                      <span style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 4,
+                        background: '#ef4444',
+                        color: '#ffffff',
+                        fontSize: 10,
+                        fontWeight: 800,
+                        padding: '2px 8px',
+                        borderRadius: 9999,
+                        letterSpacing: '0.04em'
+                      }}>
+                        <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#fff' }} />
+                        LIVE
+                      </span>
+                    </div>
+                    <p style={{ fontSize: 12, color: '#a1a1aa', margin: '3px 0 0' }}>
+                      Interactive two-way session with <strong>{interviewerName}</strong>. Discuss your approach or system architecture directly.
+                    </p>
                   </div>
                 </div>
 
-                <h1 style={{ fontSize: 20, fontWeight: 700, color: '#ffffff', margin: '0 0 12px' }}>
-                  {activeQuestion.title || 'Untitled Assessment Question'}
-                </h1>
-
-                <div style={{
-                  fontSize: 14, color: '#d4d4d8', lineHeight: 1.6, whiteSpace: 'pre-wrap'
-                }}>
-                  {activeQuestion.description || 'Analyze the prompt and provide your implementation or solution below.'}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  {audioBlocked && (
+                    <button
+                      type="button"
+                      onClick={handleUnmuteAudio}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        background: '#ef4444',
+                        color: '#ffffff',
+                        border: 'none',
+                        padding: '7px 14px',
+                        borderRadius: 8,
+                        fontSize: 12,
+                        fontWeight: 700,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <Volume2 size={14} /> Enable Audio
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => handleSwitchMode('exam')}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      background: 'rgba(255, 255, 255, 0.08)',
+                      border: '1px solid rgba(255, 255, 255, 0.16)',
+                      color: '#e4e4e7',
+                      padding: '7px 14px',
+                      borderRadius: 8,
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    <Code size={14} /> Continue with Exam / Code
+                  </button>
                 </div>
               </div>
 
-              {/* Answer Input Area: Coding / MCQ / Text */}
+              {/* Two-Way Video Call Grid */}
               <div style={{
-                background: '#12121a', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 12, padding: 24,
-                display: 'flex', flexDirection: 'column', gap: 16
+                display: 'grid',
+                gridTemplateColumns: 'minmax(0, 1.4fr) minmax(0, 1fr)',
+                gap: 16,
+                alignItems: 'stretch'
               }}>
-                {activeQuestion.type === 'mcq' ? (
-                  // Multiple Choice Question
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: '#a1a1aa', marginBottom: 4 }}>
-                      Select the correct answer:
-                    </div>
-                    {(activeQuestion.options || ['Option A', 'Option B', 'Option C', 'Option D']).map((opt, oIdx) => {
-                      const qId = activeQuestion._id || activeQuestion.id || currentQIndex;
-                      const selected = answers[qId] === oIdx;
-                      return (
-                        <button
-                          key={oIdx}
-                          onClick={() => handleAnswerChange(oIdx)}
-                          style={{
-                            padding: '14px 18px', borderRadius: 8,
-                            background: selected ? 'rgba(99, 102, 241, 0.18)' : '#181822',
-                            border: `1px solid ${selected ? '#6366f1' : 'rgba(255,255,255,0.08)'}`,
-                            color: selected ? '#ffffff' : '#d4d4d8',
-                            textAlign: 'left', cursor: 'pointer', fontSize: 14, fontWeight: selected ? 600 : 400,
-                            display: 'flex', alignItems: 'center', gap: 12, transition: 'all 0.15s ease'
-                          }}
-                        >
-                          <span style={{
-                            width: 22, height: 22, borderRadius: '50%',
-                            border: `2px solid ${selected ? '#6366f1' : '#71717a'}`,
-                            display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0
-                          }}>
-                            {selected && <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#6366f1' }} />}
-                          </span>
-                          <span>{opt.text || opt}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                ) : activeQuestion.type === 'text' ? (
-                  // Descriptive Text Answer
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    <label style={{ fontSize: 13, fontWeight: 700, color: '#a1a1aa' }}>
-                      Your Written Solution / Explanation:
-                    </label>
-                    <textarea
-                      rows={10}
-                      value={answers[activeQuestion._id || activeQuestion.id || currentQIndex] || ''}
-                      onChange={(e) => handleAnswerChange(e.target.value)}
-                      placeholder="Type your response here..."
-                      style={{
-                        width: '100%', background: '#0d0d12', border: '1px solid rgba(255,255,255,0.12)',
-                        borderRadius: 8, padding: 14, color: '#f4f4f5', fontSize: 14, lineHeight: 1.6,
-                        outline: 'none', resize: 'vertical'
-                      }}
-                    />
-                  </div>
-                ) : (
-                  // Coding Solution Editor
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#a1a1aa' }}>
-                        <Code size={16} style={{ color: '#6366f1' }} />
-                        <span>Language: <strong style={{ color: '#fff' }}>JavaScript (Node.js)</strong></span>
-                      </div>
-                      <button
-                        onClick={handleRunCode}
-                        disabled={isRunningCode}
-                        className="btn btn-secondary btn-sm"
-                        style={{ display: 'flex', alignItems: 'center', gap: 6 }}
-                      >
-                        <Play size={13} /> {isRunningCode ? 'Testing...' : 'Run Test Cases'}
-                      </button>
-                    </div>
-
-                    <textarea
-                      rows={14}
-                      value={answers[activeQuestion._id || activeQuestion.id || currentQIndex] !== undefined ? answers[activeQuestion._id || activeQuestion.id || currentQIndex] : (activeQuestion.starterCode || '// Write your algorithmic solution here\nfunction solution() {\n  \n}\n')}
-                      onChange={(e) => handleAnswerChange(e.target.value)}
-                      onKeyDown={(e) => {
-                        // Allow Tab indentation
-                        if (e.key === 'Tab') {
-                          e.preventDefault();
-                          const target = e.target;
-                          const start = target.selectionStart;
-                          const end = target.selectionEnd;
-                          const val = target.value;
-                          target.value = val.substring(0, start) + '  ' + val.substring(end);
-                          target.selectionStart = target.selectionEnd = start + 2;
-                          handleAnswerChange(target.value);
-                        }
-                      }}
-                      spellCheck={false}
-                      style={{
-                        width: '100%', background: '#0a0a0f', border: '1px solid rgba(255,255,255,0.14)',
-                        borderRadius: 8, padding: 16, color: '#a5b4fc', fontFamily: '"JetBrains Mono", Consolas, monospace',
-                        fontSize: 13, lineHeight: 1.6, outline: 'none', resize: 'vertical'
-                      }}
-                    />
-
-                    {/* Code Execution Output Console */}
-                    {runOutput && (
-                      <div style={{
-                        background: '#09090d', border: '1px solid rgba(255,255,255,0.08)',
-                        borderRadius: 8, padding: 12, fontFamily: 'monospace', fontSize: 12,
-                        color: '#4ade80', whiteSpace: 'pre-wrap'
-                      }}>
-                        {runOutput}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* Question Navigation Controls */}
+                {/* Left Primary: Remote Interviewer Stream */}
                 <div style={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  marginTop: 12, paddingTop: 16, borderTop: '1px solid rgba(255,255,255,0.06)'
+                  position: 'relative',
+                  background: '#020617',
+                  borderRadius: 16,
+                  border: '1px solid rgba(99, 102, 241, 0.4)',
+                  minHeight: 400,
+                  height: 'clamp(380px, 46vh, 520px)',
+                  overflow: 'hidden',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.6)'
                 }}>
-                  <button
-                    disabled={currentQIndex === 0}
-                    onClick={() => setCurrentQIndex(i => Math.max(0, i - 1))}
-                    className="btn btn-secondary btn-sm"
-                    style={{ opacity: currentQIndex === 0 ? 0.4 : 1 }}
-                  >
-                    <ChevronLeft size={14} /> Previous Question
-                  </button>
+                  <video
+                    ref={setInterviewerVideoNode}
+                    autoPlay
+                    playsInline
+                    className="w-full h-full object-contain bg-slate-950 rounded-2xl border border-indigo-500/40"
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      objectFit: 'contain',
+                      background: '#020617',
+                      display: interviewerRelayImage && !interviewerStream ? 'none' : 'block'
+                    }}
+                  />
 
-                  <div style={{ fontSize: 12, color: '#71717a' }}>
-                    Answers auto-sync live with interviewer
+                  <canvas
+                    ref={interviewerRelayCanvasRef}
+                    className="w-full h-full object-contain bg-slate-950 rounded-2xl"
+                    style={{
+                      position: 'absolute',
+                      inset: 0,
+                      width: '100%',
+                      height: '100%',
+                      objectFit: 'contain',
+                      display: interviewerRelayImage && !interviewerStream ? 'block' : 'none'
+                    }}
+                  />
+
+                  {/* Fallback Radar when stream is not active yet */}
+                  {!interviewerStream && !interviewerRelayImage && (
+                    <div style={{
+                      position: 'absolute',
+                      inset: 0,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      background: 'linear-gradient(180deg, #090a12 0%, #030407 100%)',
+                      color: '#a1a1aa',
+                      gap: 12
+                    }}>
+                      <div style={{
+                        width: 56,
+                        height: 56,
+                        borderRadius: '50%',
+                        background: 'rgba(99, 102, 241, 0.15)',
+                        border: '2px solid rgba(99, 102, 241, 0.4)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: '#818cf8'
+                      }}>
+                        <Radio size={28} />
+                      </div>
+                      <div style={{ textAlign: 'center' }}>
+                        <div style={{ fontSize: 14, fontWeight: 700, color: '#f4f4f5', marginBottom: 4 }}>
+                          {isInterviewerBroadcastActive ? 'Connecting to Interviewer Stream...' : 'Waiting for Interviewer to Broadcast...'}
+                        </div>
+                        <div style={{ fontSize: 12, color: '#71717a' }}>
+                          Stream connects automatically once started on the dashboard.
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Interviewer Live Badge */}
+                  <div style={{
+                    position: 'absolute',
+                    top: 14,
+                    left: 14,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    background: 'rgba(0, 0, 0, 0.75)',
+                    backdropFilter: 'blur(8px)',
+                    border: '1px solid rgba(99, 102, 241, 0.4)',
+                    borderRadius: 8,
+                    padding: '4px 10px',
+                    color: '#ffffff',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    zIndex: 10
+                  }}>
+                    <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#ef4444' }} />
+                    <span>INTERVIEWER (LIVE) • {interviewerName}</span>
                   </div>
 
-                  <button
-                    disabled={currentQIndex === questions.length - 1}
-                    onClick={() => setCurrentQIndex(i => Math.min(questions.length - 1, i + 1))}
-                    className="btn btn-secondary btn-sm"
-                    style={{ opacity: currentQIndex === questions.length - 1 ? 0.4 : 1 }}
-                  >
-                    Next Question <ChevronRight size={14} />
-                  </button>
+                  {/* Audio Status on Remote Stream */}
+                  <div style={{
+                    position: 'absolute',
+                    bottom: 14,
+                    left: 14,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    background: 'rgba(0, 0, 0, 0.7)',
+                    backdropFilter: 'blur(6px)',
+                    borderRadius: 6,
+                    padding: '3px 8px',
+                    fontSize: 10,
+                    color: audioBlocked ? '#f87171' : '#4ade80',
+                    fontWeight: 600,
+                    zIndex: 10
+                  }}>
+                    <Volume2 size={12} />
+                    <span>{audioBlocked ? 'Audio Click Required' : 'Audio Connected'}</span>
+                  </div>
+                </div>
+
+                {/* Right Column: Candidate Self View + Active Question Prompt Companion */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                  {/* Candidate Video Stage Feed */}
+                  <div style={{
+                    position: 'relative',
+                    background: '#020617',
+                    borderRadius: 16,
+                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                    minHeight: 200,
+                    height: 'clamp(180px, 22vh, 240px)',
+                    overflow: 'hidden',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    boxShadow: '0 10px 20px -5px rgba(0, 0, 0, 0.5)'
+                  }}>
+                    <video
+                      ref={setCandidateStageVideoNode}
+                      autoPlay
+                      muted
+                      playsInline
+                      style={{
+                        width: '100%',
+                        height: '100%',
+                        objectFit: 'cover',
+                        background: '#020617'
+                      }}
+                    />
+
+                    <div style={{
+                      position: 'absolute',
+                      top: 10,
+                      left: 10,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      background: 'rgba(0, 0, 0, 0.7)',
+                      backdropFilter: 'blur(8px)',
+                      borderRadius: 6,
+                      padding: '3px 8px',
+                      color: '#e4e4e7',
+                      fontSize: 10,
+                      fontWeight: 700,
+                      zIndex: 10
+                    }}>
+                      <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#10b981' }} />
+                      <span>YOU (CANDIDATE)</span>
+                    </div>
+
+                    <div style={{
+                      position: 'absolute',
+                      bottom: 10,
+                      left: 10,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6,
+                      background: 'rgba(0, 0, 0, 0.7)',
+                      backdropFilter: 'blur(8px)',
+                      borderRadius: 6,
+                      padding: '3px 8px',
+                      color: aiTelemetry.faceDetected ? '#4ade80' : '#f87171',
+                      fontSize: 10,
+                      fontWeight: 600,
+                      zIndex: 10
+                    }}>
+                      <Shield size={11} />
+                      <span>AI Proctoring Sentinel Active</span>
+                    </div>
+                  </div>
+
+                  {/* Current Question Companion Card */}
+                  {activeQuestion && (
+                    <div style={{
+                      flex: 1,
+                      background: '#12121a',
+                      border: '1px solid rgba(255, 255, 255, 0.08)',
+                      borderRadius: 14,
+                      padding: 16,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'space-between',
+                      gap: 12
+                    }}>
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                          <span style={{
+                            background: 'rgba(99, 102, 241, 0.2)',
+                            color: '#818cf8',
+                            padding: '3px 8px',
+                            borderRadius: 6,
+                            fontSize: 11,
+                            fontWeight: 700
+                          }}>
+                            Question {currentQIndex + 1} of {questions.length}
+                          </span>
+                          <span style={{ fontSize: 11, color: '#a1a1aa' }}>
+                            Topic: <strong>{activeQuestion.topic || 'Coding'}</strong>
+                          </span>
+                        </div>
+                        <h3 style={{ fontSize: 14, fontWeight: 700, color: '#fff', margin: '0 0 6px' }}>
+                          {activeQuestion.title || 'Untitled Assessment Question'}
+                        </h3>
+                        <p style={{
+                          fontSize: 12,
+                          color: '#a1a1aa',
+                          margin: 0,
+                          lineHeight: 1.45,
+                          maxHeight: 70,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          display: '-webkit-box',
+                          WebkitLineClamp: 3,
+                          WebkitBoxOrient: 'vertical'
+                        }}>
+                          {activeQuestion.description}
+                        </p>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+                        <div style={{ fontSize: 11, color: '#71717a' }}>
+                          Discuss approach before coding
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleSwitchMode('exam')}
+                          className="btn btn-secondary btn-sm"
+                          style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11 }}
+                        >
+                          <span>Open in Code Editor</span>
+                          <ChevronRight size={13} />
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
           ) : (
-            <div style={{ margin: 'auto', textAlign: 'center', color: '#a1a1aa' }}>
-              <Terminal size={36} style={{ color: '#6366f1', margin: '0 auto 12px' }} />
-              <h3>Assessment Session Ready</h3>
-              <p>Waiting for questions to load from interviewer...</p>
-            </div>
+            /* ── MODE B: CONTINUE WITH EXAM / CODING WORKSPACE ─────────────── */
+            activeQuestion ? (
+              <div style={{ maxWidth: 960, width: '100%', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 20 }}>
+                {/* Question Header */}
+                <div style={{
+                  background: '#12121a', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 12, padding: 24
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span style={{
+                        background: 'rgba(99, 102, 241, 0.2)', color: '#818cf8',
+                        padding: '4px 10px', borderRadius: 6, fontSize: 12, fontWeight: 700
+                      }}>
+                        Question {currentQIndex + 1} of {questions.length}
+                      </span>
+                      <span style={{
+                        background: activeQuestion.difficulty === 'hard' ? 'rgba(239,68,68,0.2)' : activeQuestion.difficulty === 'easy' ? 'rgba(16,185,129,0.2)' : 'rgba(245,158,11,0.2)',
+                        color: activeQuestion.difficulty === 'hard' ? '#ef4444' : activeQuestion.difficulty === 'easy' ? '#10b981' : '#f59e0b',
+                        padding: '4px 10px', borderRadius: 6, fontSize: 11, fontWeight: 700, textTransform: 'capitalize'
+                      }}>
+                        {activeQuestion.difficulty || 'Medium'}
+                      </span>
+                      <span style={{ fontSize: 12, color: '#a1a1aa' }}>
+                        Topic: <strong>{activeQuestion.topic || 'General'}</strong>
+                      </span>
+                    </div>
+
+                    <div style={{ fontSize: 12, color: '#71717a' }}>
+                      Type: <strong style={{ color: '#e4e4e7' }}>{activeQuestion.type || 'Coding'}</strong>
+                    </div>
+                  </div>
+
+                  <h1 style={{ fontSize: 20, fontWeight: 700, color: '#ffffff', margin: '0 0 12px' }}>
+                    {activeQuestion.title || 'Untitled Assessment Question'}
+                  </h1>
+
+                  <div style={{
+                    fontSize: 14, color: '#d4d4d8', lineHeight: 1.6, whiteSpace: 'pre-wrap'
+                  }}>
+                    {activeQuestion.description || 'Analyze the prompt and provide your implementation or solution below.'}
+                  </div>
+                </div>
+
+                {/* Answer Input Area: Coding / MCQ / Text */}
+                <div style={{
+                  background: '#12121a', border: '1px solid rgba(255,255,255,0.08)', borderRadius: 12, padding: 24,
+                  display: 'flex', flexDirection: 'column', gap: 16
+                }}>
+                  {activeQuestion.type === 'mcq' ? (
+                    // Multiple Choice Question
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: '#a1a1aa', marginBottom: 4 }}>
+                        Select the correct answer:
+                      </div>
+                      {(activeQuestion.options || ['Option A', 'Option B', 'Option C', 'Option D']).map((opt, oIdx) => {
+                        const qId = activeQuestion._id || activeQuestion.id || currentQIndex;
+                        const selected = answers[qId] === oIdx;
+                        return (
+                          <button
+                            key={oIdx}
+                            onClick={() => handleAnswerChange(oIdx)}
+                            style={{
+                              padding: '14px 18px', borderRadius: 8,
+                              background: selected ? 'rgba(99, 102, 241, 0.18)' : '#181822',
+                              border: `1px solid ${selected ? '#6366f1' : 'rgba(255,255,255,0.08)'}`,
+                              color: selected ? '#ffffff' : '#d4d4d8',
+                              textAlign: 'left', cursor: 'pointer', fontSize: 14, fontWeight: selected ? 600 : 400,
+                              display: 'flex', alignItems: 'center', gap: 12, transition: 'all 0.15s ease'
+                            }}
+                          >
+                            <span style={{
+                              width: 22, height: 22, borderRadius: '50%',
+                              border: `2px solid ${selected ? '#6366f1' : '#71717a'}`,
+                              display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0
+                            }}>
+                              {selected && <span style={{ width: 10, height: 10, borderRadius: '50%', background: '#6366f1' }} />}
+                            </span>
+                            <span>{opt.text || opt}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : activeQuestion.type === 'text' ? (
+                    // Descriptive Text Answer
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      <label style={{ fontSize: 13, fontWeight: 700, color: '#a1a1aa' }}>
+                        Your Written Solution / Explanation:
+                      </label>
+                      <textarea
+                        rows={10}
+                        value={answers[activeQuestion._id || activeQuestion.id || currentQIndex] || ''}
+                        onChange={(e) => handleAnswerChange(e.target.value)}
+                        placeholder="Type your response here..."
+                        style={{
+                          width: '100%', background: '#0d0d12', border: '1px solid rgba(255,255,255,0.12)',
+                          borderRadius: 8, padding: 14, color: '#f4f4f5', fontSize: 14, lineHeight: 1.6,
+                          outline: 'none', resize: 'vertical'
+                        }}
+                      />
+                    </div>
+                  ) : (
+                    // Coding Solution Editor
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#a1a1aa' }}>
+                          <Code size={16} style={{ color: '#6366f1' }} />
+                          <span>Language: <strong style={{ color: '#fff' }}>JavaScript (Node.js)</strong></span>
+                        </div>
+                        <button
+                          onClick={handleRunCode}
+                          disabled={isRunningCode}
+                          className="btn btn-secondary btn-sm"
+                          style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+                        >
+                          <Play size={13} /> {isRunningCode ? 'Testing...' : 'Run Test Cases'}
+                        </button>
+                      </div>
+
+                      <textarea
+                        rows={14}
+                        value={answers[activeQuestion._id || activeQuestion.id || currentQIndex] !== undefined ? answers[activeQuestion._id || activeQuestion.id || currentQIndex] : (activeQuestion.starterCode || '// Write your algorithmic solution here\nfunction solution() {\n  \n}\n')}
+                        onChange={(e) => handleAnswerChange(e.target.value)}
+                        onKeyDown={(e) => {
+                          // Allow Tab indentation
+                          if (e.key === 'Tab') {
+                            e.preventDefault();
+                            const target = e.target;
+                            const start = target.selectionStart;
+                            const end = target.selectionEnd;
+                            const val = target.value;
+                            target.value = val.substring(0, start) + '  ' + val.substring(end);
+                            target.selectionStart = target.selectionEnd = start + 2;
+                            handleAnswerChange(target.value);
+                          }
+                        }}
+                        spellCheck={false}
+                        style={{
+                          width: '100%', background: '#0a0a0f', border: '1px solid rgba(255,255,255,0.14)',
+                          borderRadius: 8, padding: 16, color: '#a5b4fc', fontFamily: '"JetBrains Mono", Consolas, monospace',
+                          fontSize: 13, lineHeight: 1.6, outline: 'none', resize: 'vertical'
+                        }}
+                      />
+
+                      {/* Code Execution Output Console */}
+                      {runOutput && (
+                        <div style={{
+                          background: '#09090d', border: '1px solid rgba(255,255,255,0.08)',
+                          borderRadius: 8, padding: 12, fontFamily: 'monospace', fontSize: 12,
+                          color: '#4ade80', whiteSpace: 'pre-wrap'
+                        }}>
+                          {runOutput}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Question Navigation Controls */}
+                  <div style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    marginTop: 12, paddingTop: 16, borderTop: '1px solid rgba(255,255,255,0.06)'
+                  }}>
+                    <button
+                      disabled={currentQIndex === 0}
+                      onClick={() => setCurrentQIndex(i => Math.max(0, i - 1))}
+                      className="btn btn-secondary btn-sm"
+                      style={{ opacity: currentQIndex === 0 ? 0.4 : 1 }}
+                    >
+                      <ChevronLeft size={14} /> Previous Question
+                    </button>
+
+                    <div style={{ fontSize: 12, color: '#71717a' }}>
+                      Answers auto-sync live with interviewer
+                    </div>
+
+                    <button
+                      disabled={currentQIndex === questions.length - 1}
+                      onClick={() => setCurrentQIndex(i => Math.min(questions.length - 1, i + 1))}
+                      className="btn btn-secondary btn-sm"
+                      style={{ opacity: currentQIndex === questions.length - 1 ? 0.4 : 1 }}
+                    >
+                      Next Question <ChevronRight size={14} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div style={{ margin: 'auto', textAlign: 'center', color: '#a1a1aa' }}>
+                <Terminal size={36} style={{ color: '#6366f1', margin: '0 auto 12px' }} />
+                <h3>Assessment Session Ready</h3>
+                <p>Waiting for questions to load from interviewer...</p>
+              </div>
+            )
           )}
         </main>
       </div>
+
+      {/* ── FLOATING INTERVIEWER PICTURE-IN-PICTURE (EXAM MODE) ──────────── */}
+      {interviewMode === 'exam' && (isInterviewerBroadcastActive || interviewerStream || interviewerRelayImage) && !pipMinimized && (
+        <div style={{
+          position: 'fixed',
+          bottom: 24,
+          right: 24,
+          width: 256,
+          height: 160,
+          background: '#090d16',
+          border: '2px solid rgba(99, 102, 241, 0.65)',
+          borderRadius: 14,
+          boxShadow: '0 20px 30px rgba(0, 0, 0, 0.8), 0 0 20px rgba(99, 102, 241, 0.25)',
+          zIndex: 90,
+          overflow: 'hidden',
+          display: 'flex',
+          flexDirection: 'column'
+        }}>
+          {/* PiP Header Bar */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '6px 10px',
+            background: 'rgba(15, 23, 42, 0.95)',
+            borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+            fontSize: 10,
+            color: '#fff',
+            fontWeight: 700
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#ef4444' }} />
+              <span>INTERVIEWER (LIVE)</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+              <button
+                type="button"
+                onClick={() => handleSwitchMode('face_to_face')}
+                title="Expand to Face-to-Face Mode"
+                style={{
+                  background: 'rgba(255, 255, 255, 0.1)',
+                  border: 'none',
+                  color: '#fff',
+                  borderRadius: 4,
+                  padding: 3,
+                  cursor: 'pointer',
+                  display: 'flex'
+                }}
+              >
+                <Maximize2 size={11} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setPipMinimized(true)}
+                title="Minimize floating video"
+                style={{
+                  background: 'rgba(255, 255, 255, 0.1)',
+                  border: 'none',
+                  color: '#fff',
+                  borderRadius: 4,
+                  padding: 3,
+                  cursor: 'pointer',
+                  display: 'flex'
+                }}
+              >
+                <Minimize2 size={11} />
+              </button>
+            </div>
+          </div>
+
+          {/* Video Container */}
+          <div style={{ flex: 1, position: 'relative', background: '#020617', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <video
+              ref={setInterviewerVideoNode}
+              autoPlay
+              playsInline
+              style={{
+                width: '100%',
+                height: '100%',
+                objectFit: 'contain',
+                background: '#020617',
+                display: interviewerRelayImage && !interviewerStream ? 'none' : 'block'
+              }}
+            />
+            <canvas
+              ref={interviewerRelayCanvasRef}
+              style={{
+                position: 'absolute',
+                inset: 0,
+                width: '100%',
+                height: '100%',
+                objectFit: 'contain',
+                display: interviewerRelayImage && !interviewerStream ? 'block' : 'none'
+              }}
+            />
+            {!interviewerStream && !interviewerRelayImage && (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, color: '#71717a', fontSize: 10 }}>
+                <Radio size={14} className="animate-pulse" style={{ color: '#818cf8' }} />
+                <span>Connecting broadcast...</span>
+              </div>
+            )}
+            {audioBlocked && (
+              <button
+                type="button"
+                onClick={handleUnmuteAudio}
+                style={{
+                  position: 'absolute',
+                  bottom: 6,
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  background: '#ef4444',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: 4,
+                  fontSize: 9,
+                  fontWeight: 700,
+                  padding: '2px 8px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  zIndex: 10
+                }}
+              >
+                <Volume2 size={10} /> Click to Unmute
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Minimized PiP Pill */}
+      {interviewMode === 'exam' && (isInterviewerBroadcastActive || interviewerStream || interviewerRelayImage) && pipMinimized && (
+        <button
+          type="button"
+          onClick={() => setPipMinimized(false)}
+          style={{
+            position: 'fixed',
+            bottom: 24,
+            right: 24,
+            background: 'rgba(15, 23, 42, 0.95)',
+            border: '1px solid rgba(99, 102, 241, 0.5)',
+            borderRadius: 9999,
+            padding: '8px 14px',
+            color: '#fff',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            fontSize: 11,
+            fontWeight: 700,
+            cursor: 'pointer',
+            boxShadow: '0 8px 16px rgba(0, 0, 0, 0.5)',
+            zIndex: 90
+          }}
+        >
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#ef4444' }} />
+          <span>Interviewer Live</span>
+          <Video size={13} style={{ color: '#818cf8' }} />
+        </button>
+      )}
 
       {/* ── EMERGENCY EXIT MODAL ────────────────────────────────────────── */}
       {showExitConfirm && (
