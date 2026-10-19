@@ -37,7 +37,6 @@ export default function CandidateExamKiosk({ currentUser, onExit }) {
   const [violations, setViolations] = useState([]);
   const [isFullscreen, setIsFullscreen] = useState(Boolean(document.fullscreenElement));
   const [showExitConfirm, setShowExitConfirm] = useState(false);
-  const [exitConfirmInput, setExitConfirmInput] = useState('');
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [runOutput, setRunOutput] = useState('');
@@ -785,14 +784,11 @@ export default function CandidateExamKiosk({ currentUser, onExit }) {
 
   // ── Confirm Emergency Exit ─────────────────────────────────────────────────
   const handleConfirmExit = () => {
-    if (exitConfirmInput.trim().toUpperCase() === 'EXIT') {
-      if (document.fullscreenElement) {
-        try { document.exitFullscreen(); } catch {}
-      }
-      onExit();
-    } else {
-      alert('Please type EXIT to confirm leaving the session.');
+    if (document.fullscreenElement) {
+      try { document.exitFullscreen(); } catch {}
     }
+    setShowExitConfirm(false);
+    if (onExit) onExit();
   };
 
   // ════════════════════════════════════════════════════════════════════════════
@@ -2010,29 +2006,19 @@ export default function CandidateExamKiosk({ currentUser, onExit }) {
               <AlertTriangle size={24} />
             </div>
             <h3 style={{ fontSize: 18, fontWeight: 700, margin: '0 0 8px' }}>Emergency Exit Confirmation</h3>
-            <p style={{ fontSize: 13, color: '#a1a1aa', lineHeight: 1.5, margin: '0 0 16px' }}>
-              Exiting prematurely will terminate your active kiosk session and flag the attempt to your interviewer.
-              Type <strong>EXIT</strong> to confirm.
+            <p style={{ fontSize: 13, color: '#a1a1aa', lineHeight: 1.5, margin: '0 0 20px' }}>
+              Exiting prematurely will terminate your active kiosk session and flag the attempt to your interviewer. Are you sure you want to exit?
             </p>
-            <input
-              type="text"
-              value={exitConfirmInput}
-              onChange={(e) => setExitConfirmInput(e.target.value)}
-              placeholder="Type EXIT to confirm"
-              style={{
-                width: '100%', padding: '10px 14px', borderRadius: 8,
-                background: '#0c0c10', border: '1px solid rgba(255,255,255,0.15)',
-                color: '#fff', fontSize: 14, marginBottom: 20, textAlign: 'center'
-              }}
-            />
             <div style={{ display: 'flex', gap: 10 }}>
               <button
-                onClick={() => { setShowExitConfirm(false); setExitConfirmInput(''); }}
+                type="button"
+                onClick={() => setShowExitConfirm(false)}
                 className="btn btn-secondary w-full"
               >
                 Cancel & Resume Exam
               </button>
               <button
+                type="button"
                 onClick={handleConfirmExit}
                 className="btn btn-danger w-full"
               >
