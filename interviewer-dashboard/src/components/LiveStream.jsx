@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { io } from 'socket.io-client';
 import {
   Camera, CameraOff, Maximize2, Minimize2, Mic, MicOff,
-  SwitchCamera, Radio, Volume2, User, Monitor, Wifi, Users, Code
+  SwitchCamera, Radio, Volume2, User, Monitor, Wifi
 } from 'lucide-react';
 
 const BACKEND = import.meta.env.VITE_BACKEND_URL
@@ -503,61 +503,6 @@ const LiveStream = ({
             </button>
           )}
 
-          {/* Interviewer Mode Switcher: Face-to-Face vs Exam Mode */}
-          <div style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            background: 'rgba(255, 255, 255, 0.06)',
-            border: '1px solid rgba(255, 255, 255, 0.12)',
-            borderRadius: 7,
-            padding: 2,
-            gap: 2
-          }}>
-            <button
-              type="button"
-              onClick={() => handleSetInterviewMode('face_to_face')}
-              className={`btn btn-sm ${interviewMode === 'face_to_face' ? 'btn-primary' : 'btn-ghost'}`}
-              style={{
-                padding: '3px 9px',
-                fontSize: 11,
-                fontWeight: 600,
-                borderRadius: 5,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 5,
-                background: interviewMode === 'face_to_face' ? '#6366f1' : 'transparent',
-                color: interviewMode === 'face_to_face' ? '#ffffff' : 'var(--text-muted)',
-                border: 'none',
-                cursor: 'pointer'
-              }}
-              title="Switch interview to Face-to-Face Mode (2-way live video conversation)"
-            >
-              <Users size={12} />
-              <span>Face-to-Face Mode</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => handleSetInterviewMode('exam')}
-              className={`btn btn-sm ${interviewMode === 'exam' ? 'btn-primary' : 'btn-ghost'}`}
-              style={{
-                padding: '3px 9px',
-                fontSize: 11,
-                fontWeight: 600,
-                borderRadius: 5,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 5,
-                background: interviewMode === 'exam' ? '#334155' : 'transparent',
-                color: interviewMode === 'exam' ? '#ffffff' : 'var(--text-muted)',
-                border: 'none',
-                cursor: 'pointer'
-              }}
-              title="Switch candidate to Exam / Coding Mode"
-            >
-              <Code size={12} />
-              <span>Exam Mode</span>
-            </button>
-          </div>
 
           <button
             onClick={toggleMute}
