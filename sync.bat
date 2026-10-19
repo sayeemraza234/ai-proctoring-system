@@ -7,7 +7,7 @@ color 0b
 cd /d "%~dp0"
 
 :: Execute embedded PowerShell logic seamlessly from this single file
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "$lines = [System.IO.File]::ReadAllLines('%~f0'); $code = [string]::Join([Environment]::NewLine, $lines[15..($lines.Length-1)]); Invoke-Expression $code"
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "$lines = [System.IO.File]::ReadAllLines('%~f0'); $idx = [array]::IndexOf($lines, '# BEGIN POWERSHELL'); $code = [string]::Join([Environment]::NewLine, $lines[($idx + 1)..($lines.Length - 1)]); Invoke-Expression $code"
 set "SYNC_EXIT=%ERRORLEVEL%"
 
 echo.
@@ -17,6 +17,7 @@ echo =========================================================================
 pause >nul
 exit /b %SYNC_EXIT%
 
+# BEGIN POWERSHELL
 # ══════════════════════════════════════════════════════════════════════════════
 # ProctorAI Standalone GitHub Auto-Sync Script
 # ══════════════════════════════════════════════════════════════════════════════
