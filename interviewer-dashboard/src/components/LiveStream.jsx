@@ -27,7 +27,9 @@ const LiveStream = ({
   candidateName,
   interviewerName = 'Interviewer',
   compact = false,
-  onStartCall = null
+  onStartCall = null,
+  activeStreamSource = 'webcam',
+  onToggleStreamSource = null
 }) => {
   const videoRef = useRef(null);
   const containerRef = useRef(null);
@@ -296,26 +298,31 @@ const LiveStream = ({
   return (
     <div
       ref={containerRef}
+      className="w-full h-full flex flex-col relative overflow-hidden"
       style={{
         background: 'var(--bg-card)',
-        border: '1px solid var(--border-subtle)',
-        borderRadius: '12px',
+        border: compact ? '1px solid var(--border-subtle)' : 'none',
+        borderRadius: compact ? '8px' : 0,
         overflow: 'hidden',
         display: 'flex',
         flexDirection: 'column',
-        boxShadow: 'var(--shadow-sm)',
-        position: 'relative'
+        boxShadow: compact ? 'var(--shadow-sm)' : 'none',
+        position: 'relative',
+        width: '100%',
+        height: '100%'
       }}
     >
       {/* Top Stream Bar */}
       <div
         style={{
-          padding: '8px 14px',
+          padding: '6px 14px',
           borderBottom: '1px solid var(--border-subtle)',
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          background: 'var(--bg-surface)'
+          background: 'var(--bg-surface)',
+          flexShrink: 0,
+          zIndex: 10
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -408,10 +415,13 @@ const LiveStream = ({
 
       {/* Main Video View Stage */}
       <div
+        className="relative flex-1 w-full min-h-0 bg-[#040711] flex items-center justify-center overflow-hidden aspect-video"
         style={{
           position: 'relative',
           background: '#040711',
-          height: compact ? '260px' : 'clamp(320px, 46vh, 520px)',
+          flex: 1,
+          width: '100%',
+          minHeight: 0,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -460,76 +470,110 @@ const LiveStream = ({
           ref={videoRef}
           autoPlay
           playsInline
+          className={`w-full h-full object-contain ${isSwapped ? 'z-20' : 'z-1'}`}
           style={{
             position: 'absolute',
-            inset: isSwapped ? '12px auto auto 12px' : 0,
-            width: isSwapped ? 'clamp(140px, 15vw, 200px)' : '100%',
-            height: isSwapped ? 'clamp(95px, 11vw, 140px)' : '100%',
-            objectFit: 'cover',
+            inset: isSwapped ? 'auto' : 0,
+            bottom: isSwapped ? '16px' : 0,
+            right: isSwapped ? '16px' : 0,
+            width: isSwapped ? 'clamp(120px, 15vw, 180px)' : '100%',
+            height: isSwapped ? 'clamp(75px, 10vw, 115px)' : '100%',
+            aspectRatio: isSwapped ? '16 / 9' : 'unset',
+            objectFit: 'contain',
+            background: '#040711',
             borderRadius: isSwapped ? 8 : 0,
             border: isSwapped ? '2px solid var(--primary)' : 'none',
+            boxShadow: isSwapped ? '0 4px 16px rgba(0, 0, 0, 0.65)' : 'none',
             opacity: streamActive && !hasRelayFrame ? 1 : 0,
             transition: 'opacity 0.2s ease',
-            zIndex: isSwapped ? 10 : 1
+            zIndex: isSwapped ? 20 : 1
           }}
         />
 
         {/* Canvas for Socket Relay */}
         <canvas
           ref={relayCanvasRef}
+          className={`w-full h-full object-contain ${isSwapped ? 'z-20' : 'z-2'}`}
           style={{
             position: 'absolute',
-            inset: isSwapped ? '12px auto auto 12px' : 0,
-            width: isSwapped ? 'clamp(140px, 15vw, 200px)' : '100%',
-            height: isSwapped ? 'clamp(95px, 11vw, 140px)' : '100%',
-            objectFit: 'cover',
+            inset: isSwapped ? 'auto' : 0,
+            bottom: isSwapped ? '16px' : 0,
+            right: isSwapped ? '16px' : 0,
+            width: isSwapped ? 'clamp(120px, 15vw, 180px)' : '100%',
+            height: isSwapped ? 'clamp(75px, 10vw, 115px)' : '100%',
+            aspectRatio: isSwapped ? '16 / 9' : 'unset',
+            objectFit: 'contain',
+            background: '#040711',
             borderRadius: isSwapped ? 8 : 0,
             border: isSwapped ? '2px solid var(--primary)' : 'none',
+            boxShadow: isSwapped ? '0 4px 16px rgba(0, 0, 0, 0.65)' : 'none',
             display: hasRelayFrame ? 'block' : 'none',
-            zIndex: isSwapped ? 10 : 2
+            zIndex: isSwapped ? 20 : 2
           }}
         />
 
         {/* Remote Candidate Label */}
         {streamActive && !isSwapped && (
-          <div style={{
-            position: 'absolute',
-            top: 12,
-            left: 12,
-            background: 'rgba(9, 13, 22, 0.75)',
-            backdropFilter: 'blur(8px)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: '6px',
-            padding: '4px 10px',
-            fontSize: '11px',
-            fontWeight: '600',
-            color: 'var(--text-primary)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            zIndex: 5
-          }}>
+          <div
+            className="absolute top-3 left-3 z-10 flex items-center gap-1.5"
+            style={{
+              position: 'absolute',
+              top: 12,
+              left: 12,
+              background: 'rgba(9, 13, 22, 0.85)',
+              backdropFilter: 'blur(8px)',
+              WebkitBackdropFilter: 'blur(8px)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: '6px',
+              padding: '3px 8px',
+              fontSize: '11px',
+              fontWeight: '600',
+              color: 'var(--text-primary)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              zIndex: 10
+            }}
+          >
             <User size={12} style={{ color: 'var(--text-muted)' }} />
             <span>{candidateName || 'Candidate'}</span>
+            {activeStreamSource === 'screen' && (
+              <span style={{
+                background: 'rgba(99, 102, 241, 0.25)',
+                border: '1px solid var(--primary)',
+                color: '#818cf8',
+                fontSize: 9,
+                fontWeight: 700,
+                padding: '1px 5px',
+                borderRadius: 4,
+                letterSpacing: '0.04em'
+              }}>
+                SCREEN
+              </span>
+            )}
           </div>
         )}
 
         {/* Local PiP Interviewer Video */}
         {localStream && (
           <div
+            className={`absolute overflow-hidden rounded-lg shadow-lg ${
+              isSwapped ? 'inset-0 z-1 w-full h-full' : 'bottom-4 right-4 z-20 border-2 border-[var(--border-medium)]'
+            }`}
             style={{
               position: 'absolute',
-              bottom: isSwapped ? 'auto' : '12px',
-              right: isSwapped ? 'auto' : '12px',
-              top: isSwapped ? '12px' : 'auto',
-              left: isSwapped ? '12px' : 'auto',
-              width: isSwapped ? '100%' : 'clamp(140px, 15vw, 200px)',
-              height: isSwapped ? '100%' : 'clamp(95px, 11vw, 140px)',
+              bottom: isSwapped ? 0 : '16px',
+              right: isSwapped ? 0 : '16px',
+              top: isSwapped ? 0 : 'auto',
+              left: isSwapped ? 0 : 'auto',
+              width: isSwapped ? '100%' : 'clamp(120px, 15vw, 180px)',
+              height: isSwapped ? '100%' : 'clamp(75px, 10vw, 115px)',
+              aspectRatio: isSwapped ? 'unset' : '16 / 9',
               borderRadius: isSwapped ? 0 : '8px',
               overflow: 'hidden',
-              border: isSwapped ? 'none' : '2px solid var(--border-medium)',
-              boxShadow: isSwapped ? 'none' : 'var(--shadow-lg)',
-              zIndex: isSwapped ? 1 : 10,
+              border: isSwapped ? 'none' : '2px solid rgba(255, 255, 255, 0.25)',
+              boxShadow: isSwapped ? 'none' : '0 4px 16px rgba(0, 0, 0, 0.65)',
+              zIndex: isSwapped ? 1 : 20,
               background: '#09101d'
             }}
           >
@@ -538,10 +582,12 @@ const LiveStream = ({
               autoPlay
               muted
               playsInline
+              className="w-full h-full object-contain"
               style={{
                 width: '100%',
                 height: '100%',
-                objectFit: 'cover',
+                objectFit: 'contain',
+                background: '#09101d',
                 display: isVideoOff ? 'none' : 'block'
               }}
             />
@@ -568,10 +614,11 @@ const LiveStream = ({
               fontSize: 10,
               fontWeight: 700,
               color: '#ffffff',
-              background: 'rgba(0, 0, 0, 0.65)',
+              background: 'rgba(0, 0, 0, 0.75)',
               padding: '2px 6px',
               borderRadius: 4,
-              letterSpacing: 0.5
+              letterSpacing: 0.5,
+              zIndex: 2
             }}>
               YOU {isMuted ? '• Muted' : ''}
             </div>

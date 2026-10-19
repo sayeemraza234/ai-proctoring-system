@@ -22,7 +22,10 @@ export default function LiveStreamContainer({
   compact = false,
   streamType = 'webcam', // 'webcam' | 'screen'
   onInspect,
-  interviewerName = 'Interviewer'
+  interviewerName = 'Interviewer',
+  height,
+  isFocused = false,
+  onToggleStreamSource
 }) {
   const [activeStreamSource, setActiveStreamSource] = useState(streamType);
   const [isMuted, setIsMuted] = useState(false);
@@ -31,9 +34,15 @@ export default function LiveStreamContainer({
   const candidateName = candidate?.candidate_name || candidate?.fullname || 'Candidate';
   const resolvedRoomId = roomId || candidate?.interview_id || candidate?.id;
 
+  const handleToggleStream = () => {
+    const next = activeStreamSource === 'webcam' ? 'screen' : 'webcam';
+    setActiveStreamSource(next);
+    if (onToggleStreamSource) onToggleStreamSource(next);
+  };
+
   return (
     <div
-      className="stream-aspect-container"
+      className="stream-aspect-container aspect-video w-full"
       style={{
         position: 'relative',
         width: '100%',
@@ -41,13 +50,15 @@ export default function LiveStreamContainer({
         backgroundColor: '#090a0f',
         borderRadius: compact ? 0 : 8,
         overflow: 'hidden',
-        border: compact ? 'none' : '1px solid var(--border-subtle)'
+        border: compact ? 'none' : '1px solid var(--border-subtle)',
+        display: 'flex',
+        flexDirection: 'column'
       }}
     >
       {/* ── TOP-LEFT STATUS BADGE ────────────────────────────────────────── */}
       {compact ? (
         isLive && (
-          <div className="stream-overlay-badge stream-badge-top-left" style={{ zIndex: 10, padding: '2px 6px' }}>
+          <div className="stream-overlay-badge stream-badge-top-left pointer-events-none" style={{ zIndex: 15, padding: '2px 6px', pointerEvents: 'none' }}>
             <span style={{
               width: 6,
               height: 6,
@@ -59,7 +70,7 @@ export default function LiveStreamContainer({
           </div>
         )
       ) : (
-        <div className="stream-overlay-badge stream-badge-top-left" style={{ zIndex: 10 }}>
+        <div className="stream-overlay-badge stream-badge-top-left pointer-events-none" style={{ zIndex: 15, pointerEvents: 'none' }}>
           {isLive ? (
             <>
               <span style={{
@@ -89,7 +100,7 @@ export default function LiveStreamContainer({
 
       {/* ── TOP-RIGHT TELEMETRY BADGE (Inspection View Only) ───────────────── */}
       {!compact && (
-        <div className="stream-overlay-badge stream-badge-top-right" style={{ zIndex: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div className="stream-overlay-badge stream-badge-top-right pointer-events-none" style={{ zIndex: 15, display: 'flex', alignItems: 'center', gap: 6, pointerEvents: 'none' }}>
           {isLive ? (
             <>
               <Wifi size={11} style={{ color: '#10b981' }} />
@@ -97,7 +108,7 @@ export default function LiveStreamContainer({
                 28ms
               </span>
               {activeStreamSource === 'screen' ? (
-                <span className="badge badge-primary" style={{ fontSize: 9, padding: '1px 5px' }}>SCREEN</span>
+                <span className="badge badge-primary" style={{ fontSize: 9, padding: '1px 6px', fontWeight: 700 }}>SCREEN ACTIVE</span>
               ) : (
                 <span className="badge badge-secondary" style={{ fontSize: 9, padding: '1px 5px' }}>CAM</span>
               )}
@@ -186,12 +197,17 @@ export default function LiveStreamContainer({
           </div>
         ) : (
           /* Full Deep-Dive WebRTC Feed Container */
-          <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+          <div
+            className="w-full h-full flex-1 min-h-0 relative overflow-hidden"
+            style={{ width: '100%', height: '100%', flex: 1, minHeight: 0, position: 'relative', overflow: 'hidden' }}
+          >
             <LiveStream
               roomId={resolvedRoomId}
               candidateName={candidateName}
               interviewerName={interviewerName}
               compact={false}
+              activeStreamSource={activeStreamSource}
+              onToggleStreamSource={handleToggleStream}
             />
           </div>
         )
@@ -241,31 +257,50 @@ export default function LiveStreamContainer({
       {/* ── BOTTOM STREAM CONTROLS (Only in Focused / Modal View) ─────────── */}
       {!compact && isLive && (
         <div
+          className="stream-bottom-controls absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-1.5 z-30 pointer-events-auto"
           style={{
             position: 'absolute',
-            bottom: 10,
+            bottom: 14,
             left: '50%',
             transform: 'translateX(-50%)',
             display: 'flex',
             alignItems: 'center',
             gap: 6,
-            background: 'rgba(10, 10, 12, 0.85)',
-            backdropFilter: 'blur(8px)',
-            border: '1px solid rgba(255, 255, 255, 0.12)',
+            background: 'rgba(10, 10, 14, 0.88)',
+            backdropFilter: 'blur(10px)',
+            WebkitBackdropFilter: 'blur(10px)',
+            border: '1px solid rgba(255, 255, 255, 0.16)',
             borderRadius: 9999,
             padding: '4px 10px',
-            zIndex: 20
+            zIndex: 30,
+            pointerEvents: 'auto',
+            boxShadow: '0 4px 16px rgba(0, 0, 0, 0.5)'
           }}
         >
           <button
             type="button"
-            onClick={() => setActiveStreamSource(s => s === 'webcam' ? 'screen' : 'webcam')}
-            className="btn btn-ghost btn-sm"
-            style={{ padding: '2px 8px', fontSize: 11, display: 'flex', alignItems: 'center', gap: 4 }}
-            title="Toggle between Webcam and Screen Share feed"
+            onClick={handleToggleStream}
+            className={`btn btn-sm ${activeStreamSource === 'screen' ? 'btn-primary active' : 'btn-ghost'}`}
+            style={{
+              padding: '3px 10px',
+              fontSize: 11,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+              fontWeight: 600,
+              borderRadius: 9999,
+              background: activeStreamSource === 'screen' ? 'var(--primary)' : 'rgba(255, 255, 255, 0.08)',
+              color: activeStreamSource === 'screen' ? '#ffffff' : 'var(--text-secondary)',
+              border: `1px solid ${activeStreamSource === 'screen' ? 'var(--primary)' : 'rgba(255, 255, 255, 0.12)'}`,
+              boxShadow: activeStreamSource === 'screen' ? '0 0 12px rgba(99, 102, 241, 0.6)' : 'none',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+              pointerEvents: 'auto'
+            }}
+            title={activeStreamSource === 'screen' ? 'Currently viewing screen share. Click to view candidate camera.' : 'Click to view candidate screen share.'}
           >
-            {activeStreamSource === 'webcam' ? <Monitor size={12} /> : <Camera size={12} />}
-            <span>{activeStreamSource === 'webcam' ? 'View Screen' : 'View Cam'}</span>
+            {activeStreamSource === 'screen' ? <Camera size={12} /> : <Monitor size={12} />}
+            <span>{activeStreamSource === 'screen' ? 'Viewing Screen' : 'View Screen'}</span>
           </button>
 
           <span style={{ width: 1, height: 12, background: 'rgba(255, 255, 255, 0.15)' }} />
@@ -274,7 +309,7 @@ export default function LiveStreamContainer({
             type="button"
             onClick={() => setIsMuted(m => !m)}
             className="btn btn-ghost btn-icon btn-sm"
-            style={{ color: isMuted ? 'var(--danger)' : 'var(--text-secondary)' }}
+            style={{ color: isMuted ? 'var(--danger)' : 'var(--text-secondary)', cursor: 'pointer', pointerEvents: 'auto' }}
             title={isMuted ? 'Unmute Audio Preview' : 'Mute Audio Preview'}
           >
             {isMuted ? <MicOff size={13} /> : <Mic size={13} />}

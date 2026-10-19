@@ -394,15 +394,19 @@ export default function LiveMonitoringView({
       {/* ══════════════════════════════════════════════════════════════════════
          WORKSPACE MAIN CONTENT AREA: DEDICATED FULL VIEW TERMINAL
          ══════════════════════════════════════════════════════════════════════ */}
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative', marginTop: 8 }}>
+      <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative', marginTop: 8, minWidth: 0, width: '100%', maxWidth: '100%' }}>
         <main
+          className="w-full max-w-full min-w-0"
           style={{
             flex: 1,
             display: 'flex',
             flexDirection: 'column',
             gap: 10,
             padding: 12,
-            overflow: 'hidden'
+            overflow: 'hidden',
+            minWidth: 0,
+            width: '100%',
+            maxWidth: '100%'
           }}
           role="region"
           aria-label="Full View Candidate Monitoring Terminal"
@@ -416,18 +420,21 @@ export default function LiveMonitoringView({
               <>
                 {/* Full View Candidate Header Bar */}
                 <div
-                  className="card"
+                  className="card flex-wrap gap-2.5"
                   style={{
                     padding: '8px 14px',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'space-between',
                     borderRadius: 10,
-                    flexShrink: 0
+                    flexShrink: 0,
+                    minWidth: 0,
+                    width: '100%',
+                    maxWidth: '100%'
                   }}
                 >
                   {/* Candidate Identity */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flexShrink: 1, overflow: 'hidden' }}>
 
                       <div style={{
                         width: 34,
@@ -450,11 +457,11 @@ export default function LiveMonitoringView({
                           <h2 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', margin: 0 }} className="truncate">
                             {currentFocusedCandidate.candidate_name || currentFocusedCandidate.fullname}
                           </h2>
-                          <span className={`badge ${isLive ? 'badge-active' : currentFocusedCandidate.status === 'scheduled' ? 'badge-scheduled' : 'badge-completed'}`}>
+                          <span className={`badge ${isLive ? 'badge-active' : currentFocusedCandidate.status === 'scheduled' ? 'badge-scheduled' : 'badge-completed'} flex-shrink-0`}>
                             {isLive ? 'LIVE' : currentFocusedCandidate.status}
                           </span>
                         </div>
-                        <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', gap: 8 }}>
+                        <div className="truncate" style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                           <span>Role: {currentFocusedCandidate.job_role || currentFocusedCandidate.role || 'Software Engineer'}</span>
                           <span>•</span>
                           <span>Session ID: #{String(currentFocusedCandidate.interview_id || currentFocusedCandidate.id || '').slice(-6)}</span>
@@ -465,9 +472,9 @@ export default function LiveMonitoringView({
                     </div>
 
                     {/* Sub-Layout Mode & Focused Actions */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, flexWrap: 'wrap' }}>
                       {/* Split / Video / Code Focus Buttons */}
-                      <div className="density-toggle-group">
+                      <div className="density-toggle-group flex-shrink-0">
                         <button
                           type="button"
                           onClick={() => setFocusedLayoutMode('split')}
@@ -504,7 +511,7 @@ export default function LiveMonitoringView({
                           setWarningModalCandidate(currentFocusedCandidate);
                           setWarningMessage(warningPresets[0]);
                         }}
-                        className="btn btn-secondary btn-sm"
+                        className="btn btn-secondary btn-sm flex-shrink-0"
                         title="Send Warning Notification to candidate"
                       >
                         <MessageSquare size={12} />
@@ -514,7 +521,7 @@ export default function LiveMonitoringView({
                       <button
                         type="button"
                         onClick={() => setFlagModalCandidate(currentFocusedCandidate)}
-                        className="btn btn-secondary btn-sm"
+                        className="btn btn-secondary btn-sm flex-shrink-0"
                         title="Manually Flag Integrity Incident"
                       >
                         <Flag size={12} />
@@ -527,7 +534,7 @@ export default function LiveMonitoringView({
                           type="button"
                           onClick={runAiEvaluation}
                           disabled={isEvaluating}
-                          className="btn btn-primary btn-sm"
+                          className="btn btn-primary btn-sm flex-shrink-0"
                           title="Run automated Gemini AI Code & Proctoring evaluation"
                         >
                           <Sparkles size={12} />
@@ -540,7 +547,7 @@ export default function LiveMonitoringView({
                         <button
                           type="button"
                           onClick={() => setTerminateModalCandidate(currentFocusedCandidate)}
-                          className="btn btn-danger btn-sm"
+                          className="btn btn-danger btn-sm flex-shrink-0"
                           title="Terminate candidate interview session"
                         >
                           <PhoneOff size={12} />
@@ -552,7 +559,7 @@ export default function LiveMonitoringView({
                         <button
                           type="button"
                           onClick={() => onActivateInterview(currentFocusedCandidate.interview_id || currentFocusedCandidate.id)}
-                          className="btn btn-success btn-sm"
+                          className="btn btn-success btn-sm flex-shrink-0"
                         >
                           <Play size={12} />
                           <span>Activate Session</span>
@@ -562,21 +569,43 @@ export default function LiveMonitoringView({
                   </div>
 
                   {/* Focused Workspace Body */}
-                  <div style={{ flex: 1, display: 'flex', gap: 10, minHeight: 0, overflow: 'hidden' }}>
-
-                    {/* Left Stage: 16:9 Stream Feed */}
+                  <div
+                    className="grid grid-cols-1 lg:grid-cols-12 gap-3 w-full max-w-full min-w-0 flex-1 min-h-0 overflow-hidden"
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: focusedLayoutMode === 'videoFocus'
+                        ? '1fr'
+                        : focusedLayoutMode === 'codeFocus'
+                          ? '1fr'
+                          : undefined,
+                      width: '100%',
+                      maxWidth: '100%',
+                      minWidth: 0,
+                      flex: 1,
+                      minHeight: 0,
+                      overflow: 'hidden'
+                    }}
+                  >
+                    {/* Left Stage: 16:9 Stream Feed & AI Follow-Ups */}
                     {(focusedLayoutMode === 'split' || focusedLayoutMode === 'videoFocus') && (
                       <div
+                        className={`flex flex-col gap-2.5 min-w-0 max-w-full min-h-0 overflow-hidden ${
+                          focusedLayoutMode === 'videoFocus' ? 'col-span-12' : 'col-span-12 lg:col-span-7'
+                        }`}
                         style={{
-                          flex: focusedLayoutMode === 'videoFocus' ? 1 : '0 0 48%',
                           display: 'flex',
                           flexDirection: 'column',
                           gap: 10,
                           minWidth: 0,
+                          maxWidth: '100%',
+                          minHeight: 0,
                           overflow: 'hidden'
                         }}
                       >
-                        <div className="card" style={{ padding: 0, overflow: 'hidden', flexShrink: 0 }}>
+                        <div
+                          className="card w-full max-w-full min-w-0"
+                          style={{ padding: 0, overflow: 'hidden', flexShrink: 0, width: '100%', maxWidth: '100%' }}
+                        >
                           <LiveStreamContainer
                             candidate={currentFocusedCandidate}
                             roomId={currentFocusedCandidate.interview_id || currentFocusedCandidate.id}
@@ -587,23 +616,28 @@ export default function LiveMonitoringView({
 
                         {/* AI Co-Pilot Follow-Up Prompts */}
                         {handleGetAiFollowup && (
-                          <div className="card" style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', padding: 12 }}>
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                <Sparkles size={14} style={{ color: 'var(--primary)' }} />
-                                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>AI Co-Pilot Follow-Ups</span>
+                          <div
+                            className="card flex-1 flex flex-col min-h-0 min-w-0 max-w-full overflow-hidden p-3"
+                            style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0, maxWidth: '100%', overflow: 'hidden', padding: 12 }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, minWidth: 0, flexShrink: 0 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                                <Sparkles size={14} style={{ color: 'var(--primary)', flexShrink: 0 }} />
+                                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }} className="truncate">
+                                  AI Co-Pilot Follow-Ups
+                                </span>
                               </div>
                               <button
                                 onClick={handleGetAiFollowup}
                                 disabled={isGeneratingFollowup}
-                                className="btn btn-ghost btn-sm"
+                                className="btn btn-ghost btn-sm flex-shrink-0"
                                 style={{ fontSize: 10, padding: '2px 8px' }}
                               >
                                 {isGeneratingFollowup ? 'Generating...' : 'Refresh Suggestions'}
                               </button>
                             </div>
 
-                            <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                            <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 6, minHeight: 0, minWidth: 0 }}>
                               {aiFollowups && aiFollowups.length > 0 ? (
                                 aiFollowups.map((q, idx) => (
                                   <div
@@ -615,7 +649,8 @@ export default function LiveMonitoringView({
                                       border: '1px solid var(--border-subtle)',
                                       fontSize: 11,
                                       color: 'var(--text-secondary)',
-                                      lineHeight: 1.5
+                                      lineHeight: 1.5,
+                                      wordBreak: 'break-word'
                                     }}
                                   >
                                     💡 {q}
@@ -635,12 +670,15 @@ export default function LiveMonitoringView({
                     {/* Right Stage: Synchronized Code & Execution Console */}
                     {(focusedLayoutMode === 'split' || focusedLayoutMode === 'codeFocus') && (
                       <div
-                        className="card"
+                        className={`card flex flex-col min-w-0 max-w-full min-h-0 overflow-hidden p-0 ${
+                          focusedLayoutMode === 'codeFocus' ? 'col-span-12' : 'col-span-12 lg:col-span-5'
+                        }`}
                         style={{
-                          flex: 1,
                           display: 'flex',
                           flexDirection: 'column',
                           minWidth: 0,
+                          maxWidth: '100%',
+                          minHeight: 0,
                           overflow: 'hidden',
                           padding: 0
                         }}
@@ -652,21 +690,23 @@ export default function LiveMonitoringView({
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'space-between',
-                          background: 'var(--bg-surface)'
+                          background: 'var(--bg-surface)',
+                          minWidth: 0,
+                          flexShrink: 0
                         }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            <Code size={13} style={{ color: 'var(--primary)' }} />
-                            <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                            <Code size={13} style={{ color: 'var(--primary)', flexShrink: 0 }} />
+                            <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }} className="truncate">
                               Candidate Live Editor Mirror
                             </span>
-                            <span className="badge badge-active" style={{ fontSize: 9 }}>SYNC ACTIVE</span>
+                            <span className="badge badge-active flex-shrink-0" style={{ fontSize: 9 }}>SYNC ACTIVE</span>
                           </div>
 
                           {handleRunCode && (
                             <button
                               onClick={() => handleRunCode(candidateLiveCode || '')}
                               disabled={isExecuting}
-                              className="btn btn-secondary btn-sm"
+                              className="btn btn-secondary btn-sm flex-shrink-0"
                               style={{ height: 26, fontSize: 10, padding: '0 8px' }}
                             >
                               <Play size={10} />
@@ -676,13 +716,16 @@ export default function LiveMonitoringView({
                         </div>
 
                         {/* Synchronized Code Textarea */}
-                        <div style={{ flex: 1, position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                        <div style={{ flex: 1, minHeight: 0, minWidth: 0, position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                           <textarea
                             readOnly
                             value={candidateLiveCode || '// Waiting for candidate to type code in their terminal editor...\n// Updates are mirrored here in real time.'}
-                            className="form-textarea"
+                            className="form-textarea w-full min-w-0"
                             style={{
                               flex: 1,
+                              width: '100%',
+                              minWidth: 0,
+                              maxWidth: '100%',
                               borderRadius: 0,
                               border: 'none',
                               background: '#040711',
@@ -691,13 +734,14 @@ export default function LiveMonitoringView({
                               fontSize: 12,
                               lineHeight: 1.7,
                               padding: 14,
-                              resize: 'none'
+                              resize: 'none',
+                              boxSizing: 'border-box'
                             }}
                           />
 
                           {/* Code Execution Output Panel */}
                           {codeOutput !== null && (
-                            <div className={`code-output ${codeOutputError ? 'error' : ''}`} style={{ maxHeight: 150, overflowY: 'auto' }}>
+                            <div className={`code-output ${codeOutputError ? 'error' : ''}`} style={{ maxHeight: 150, overflowY: 'auto', minWidth: 0 }}>
                               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 10, color: 'var(--text-muted)' }}>
                                 <span>OUTPUT CONSOLE</span>
                                 <button
@@ -707,7 +751,7 @@ export default function LiveMonitoringView({
                                   Clear
                                 </button>
                               </div>
-                              <pre style={{ margin: 0, fontFamily: 'inherit', fontSize: 'inherit' }}>{codeOutput}</pre>
+                              <pre style={{ margin: 0, fontFamily: 'inherit', fontSize: 'inherit', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{codeOutput}</pre>
                             </div>
                           )}
                         </div>
