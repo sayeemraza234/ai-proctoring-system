@@ -1266,7 +1266,7 @@ export default function CandidateExamKiosk({ currentUser, onExit }) {
         <main style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#0a0a0f', overflowY: 'auto', padding: 24 }}>
           {interviewMode === 'face_to_face' ? (
             /* ── MODE A: FACE-TO-FACE INTERVIEW STAGE ────────────────────── */
-            <div style={{ maxWidth: 1200, width: '100%', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 20 }}>
+            <div style={{ maxWidth: 1440, width: '100%', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 20 }}>
               {/* Stage Header Banner */}
               <div style={{
                 background: 'linear-gradient(90deg, rgba(30, 27, 75, 0.6) 0%, rgba(15, 23, 42, 0.8) 100%)',
@@ -1365,32 +1365,41 @@ export default function CandidateExamKiosk({ currentUser, onExit }) {
                 </div>
               </div>
 
-              {/* Two-Way Video Call Grid */}
-              <div style={{
-                display: 'grid',
-                gridTemplateColumns: 'minmax(0, 1.4fr) minmax(0, 1fr)',
-                gap: 16,
-                alignItems: 'stretch'
-              }}>
-                {/* Left Primary: Remote Interviewer Stream */}
-                <div style={{
-                  position: 'relative',
-                  background: '#020617',
-                  borderRadius: 16,
-                  border: '1px solid rgba(99, 102, 241, 0.4)',
-                  minHeight: 400,
-                  height: 'clamp(380px, 46vh, 520px)',
-                  overflow: 'hidden',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.6)'
-                }}>
+              {/* Two-Way Video Call Grid - Equal 50/50 Balanced Split */}
+              <div
+                className="grid grid-cols-1 lg:grid-cols-2 gap-4 w-full items-stretch"
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))',
+                  gap: 16,
+                  width: '100%',
+                  alignItems: 'stretch'
+                }}
+              >
+                {/* Left: Remote Interviewer Stream */}
+                <div
+                  className="relative overflow-hidden rounded-2xl bg-slate-950 border border-slate-800 shadow-xl flex flex-col items-center justify-center"
+                  style={{
+                    position: 'relative',
+                    background: '#020617',
+                    borderRadius: 16,
+                    border: '1px solid rgba(99, 102, 241, 0.4)',
+                    minHeight: 340,
+                    height: 'clamp(340px, 44vh, 500px)',
+                    width: '100%',
+                    overflow: 'hidden',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.6)'
+                  }}
+                >
                   <video
                     ref={setInterviewerVideoNode}
                     autoPlay
                     playsInline
-                    className="w-full h-full object-contain bg-slate-950 rounded-2xl border border-indigo-500/40"
+                    className="w-full h-full object-contain bg-slate-950 rounded-2xl"
                     style={{
                       width: '100%',
                       height: '100%',
@@ -1494,142 +1503,151 @@ export default function CandidateExamKiosk({ currentUser, onExit }) {
                   </div>
                 </div>
 
-                {/* Right Column: Candidate Self View + Active Question Prompt Companion */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                  {/* Candidate Video Stage Feed */}
-                  <div style={{
+                {/* Right: Candidate Self View (Broad, Spacious & Full-Fidelity) */}
+                <div
+                  className="relative overflow-hidden rounded-2xl bg-slate-950 border border-slate-800 shadow-xl flex flex-col items-center justify-center"
+                  style={{
                     position: 'relative',
                     background: '#020617',
                     borderRadius: 16,
-                    border: '1px solid rgba(255, 255, 255, 0.1)',
-                    minHeight: 200,
-                    height: 'clamp(180px, 22vh, 240px)',
+                    border: '1px solid rgba(255, 255, 255, 0.12)',
+                    minHeight: 340,
+                    height: 'clamp(340px, 44vh, 500px)',
+                    width: '100%',
                     overflow: 'hidden',
                     display: 'flex',
+                    flexDirection: 'column',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    boxShadow: '0 10px 20px -5px rgba(0, 0, 0, 0.5)'
+                    boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.6)'
+                  }}
+                >
+                  <video
+                    ref={setCandidateStageVideoNode}
+                    autoPlay
+                    muted
+                    playsInline
+                    className="w-full h-full object-contain bg-slate-950 rounded-2xl"
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      objectFit: 'contain',
+                      background: '#020617'
+                    }}
+                  />
+
+                  {/* Candidate Live Overlay Badge */}
+                  <div style={{
+                    position: 'absolute',
+                    top: 14,
+                    left: 14,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    background: 'rgba(0, 0, 0, 0.75)',
+                    backdropFilter: 'blur(8px)',
+                    border: '1px solid rgba(255, 255, 255, 0.14)',
+                    borderRadius: 8,
+                    padding: '4px 10px',
+                    color: '#e4e4e7',
+                    fontSize: 11,
+                    fontWeight: 700,
+                    zIndex: 10
                   }}>
-                    <video
-                      ref={setCandidateStageVideoNode}
-                      autoPlay
-                      muted
-                      playsInline
-                      style={{
-                        width: '100%',
-                        height: '100%',
-                        objectFit: 'cover',
-                        background: '#020617'
-                      }}
-                    />
-
-                    <div style={{
-                      position: 'absolute',
-                      top: 10,
-                      left: 10,
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 6,
-                      background: 'rgba(0, 0, 0, 0.7)',
-                      backdropFilter: 'blur(8px)',
-                      borderRadius: 6,
-                      padding: '3px 8px',
-                      color: '#e4e4e7',
-                      fontSize: 10,
-                      fontWeight: 700,
-                      zIndex: 10
-                    }}>
-                      <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#10b981' }} />
-                      <span>YOU (CANDIDATE)</span>
-                    </div>
-
-                    <div style={{
-                      position: 'absolute',
-                      bottom: 10,
-                      left: 10,
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 6,
-                      background: 'rgba(0, 0, 0, 0.7)',
-                      backdropFilter: 'blur(8px)',
-                      borderRadius: 6,
-                      padding: '3px 8px',
-                      color: aiTelemetry.faceDetected ? '#4ade80' : '#f87171',
-                      fontSize: 10,
-                      fontWeight: 600,
-                      zIndex: 10
-                    }}>
-                      <Shield size={11} />
-                      <span>AI Proctoring Sentinel Active</span>
-                    </div>
+                    <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#10b981' }} />
+                    <span>YOU (CANDIDATE)</span>
                   </div>
 
-                  {/* Current Question Companion Card */}
-                  {activeQuestion && (
-                    <div style={{
-                      flex: 1,
-                      background: '#12121a',
-                      border: '1px solid rgba(255, 255, 255, 0.08)',
-                      borderRadius: 14,
-                      padding: 16,
-                      display: 'flex',
-                      flexDirection: 'column',
-                      justifyContent: 'space-between',
-                      gap: 12
-                    }}>
-                      <div>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                          <span style={{
-                            background: 'rgba(99, 102, 241, 0.2)',
-                            color: '#818cf8',
-                            padding: '3px 8px',
-                            borderRadius: 6,
-                            fontSize: 11,
-                            fontWeight: 700
-                          }}>
-                            Question {currentQIndex + 1} of {questions.length}
-                          </span>
-                          <span style={{ fontSize: 11, color: '#a1a1aa' }}>
-                            Topic: <strong>{activeQuestion.topic || 'Coding'}</strong>
-                          </span>
-                        </div>
-                        <h3 style={{ fontSize: 14, fontWeight: 700, color: '#fff', margin: '0 0 6px' }}>
-                          {activeQuestion.title || 'Untitled Assessment Question'}
-                        </h3>
-                        <p style={{
-                          fontSize: 12,
-                          color: '#a1a1aa',
-                          margin: 0,
-                          lineHeight: 1.45,
-                          maxHeight: 70,
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                          display: '-webkit-box',
-                          WebkitLineClamp: 3,
-                          WebkitBoxOrient: 'vertical'
-                        }}>
-                          {activeQuestion.description}
-                        </p>
-                      </div>
-
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                        <div style={{ fontSize: 11, color: '#71717a' }}>
-                          Discuss approach before coding
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => handleSwitchMode('exam')}
-                          className="btn btn-secondary btn-sm"
-                          style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11 }}
-                        >
-                          <span>Open in Code Editor</span>
-                          <ChevronRight size={13} />
-                        </button>
-                      </div>
-                    </div>
-                  )}
+                  {/* AI Sentinel Status Overlay Badge */}
+                  <div style={{
+                    position: 'absolute',
+                    bottom: 14,
+                    left: 14,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    background: 'rgba(0, 0, 0, 0.7)',
+                    backdropFilter: 'blur(6px)',
+                    borderRadius: 6,
+                    padding: '3px 8px',
+                    color: aiTelemetry.faceDetected ? '#4ade80' : '#f87171',
+                    fontSize: 10,
+                    fontWeight: 600,
+                    zIndex: 10
+                  }}>
+                    <Shield size={12} />
+                    <span>AI Proctoring Sentinel Active</span>
+                  </div>
                 </div>
               </div>
+
+              {/* Current Question Companion Card (Full-width underneath video stage) */}
+              {activeQuestion && (
+                <div style={{
+                  background: '#12121a',
+                  border: '1px solid rgba(255, 255, 255, 0.08)',
+                  borderRadius: 14,
+                  padding: '18px 24px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 12,
+                  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.3)'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span style={{
+                        background: 'rgba(99, 102, 241, 0.2)',
+                        color: '#818cf8',
+                        padding: '4px 10px',
+                        borderRadius: 6,
+                        fontSize: 11,
+                        fontWeight: 700
+                      }}>
+                        Question {currentQIndex + 1} of {questions.length}
+                      </span>
+                      <span style={{
+                        background: activeQuestion.difficulty === 'hard' ? 'rgba(239,68,68,0.2)' : activeQuestion.difficulty === 'easy' ? 'rgba(16,185,129,0.2)' : 'rgba(245,158,11,0.2)',
+                        color: activeQuestion.difficulty === 'hard' ? '#ef4444' : activeQuestion.difficulty === 'easy' ? '#10b981' : '#f59e0b',
+                        padding: '3px 8px',
+                        borderRadius: 6,
+                        fontSize: 10,
+                        fontWeight: 700,
+                        textTransform: 'capitalize'
+                      }}>
+                        {activeQuestion.difficulty || 'Medium'}
+                      </span>
+                      <span style={{ fontSize: 12, color: '#a1a1aa' }}>
+                        Topic: <strong style={{ color: '#e4e4e7' }}>{activeQuestion.topic || 'General'}</strong>
+                      </span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleSwitchMode('exam')}
+                      className="btn btn-secondary btn-sm"
+                      style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600 }}
+                    >
+                      <span>Open in Code Editor</span>
+                      <ChevronRight size={14} />
+                    </button>
+                  </div>
+
+                  <h3 style={{ fontSize: 16, fontWeight: 700, color: '#ffffff', margin: 0 }}>
+                    {activeQuestion.title || 'Untitled Assessment Question'}
+                  </h3>
+
+                  <p style={{
+                    fontSize: 13,
+                    color: '#d4d4d8',
+                    margin: 0,
+                    lineHeight: 1.6,
+                    maxHeight: 100,
+                    overflowY: 'auto'
+                  }}>
+                    {activeQuestion.description}
+                  </p>
+                </div>
+              )}
             </div>
           ) : (
             /* ── MODE B: CONTINUE WITH EXAM / CODING WORKSPACE ─────────────── */
