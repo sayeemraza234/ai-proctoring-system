@@ -1098,9 +1098,7 @@ h1, h2, h3, h4, h5, h6 {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  height: calc(100vh - 104px);
-  min-height: 580px;
-  overflow: hidden;
+  min-height: 100%;
   position: relative;
   width: 100%;
   max-width: 100%;
@@ -1268,11 +1266,11 @@ h1, h2, h3, h4, h5, h6 {
   width: 100%;
   position: relative;
   overflow: hidden;
-  background: #08080c;
+  background: #020617;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-bottom: 1px solid var(--border-subtle);
+  border-bottom: none;
 }
 
 .stream-overlay-badge {

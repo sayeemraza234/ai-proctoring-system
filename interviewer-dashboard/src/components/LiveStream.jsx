@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
 import {
   Camera, CameraOff, Maximize2, Minimize2, Mic, MicOff,
-  SwitchCamera, Radio, Volume2, User
+  SwitchCamera, Radio, Volume2, User, Monitor, Wifi
 } from 'lucide-react';
 
 const BACKEND = import.meta.env.VITE_BACKEND_URL
@@ -48,6 +48,19 @@ const LiveStream = ({
   const [hasRelayFrame, setHasRelayFrame] = useState(false);
   const [isSwapped, setIsSwapped] = useState(false);
   const [interviewerStarted, setInterviewerStarted] = useState(false);
+  const [currentStreamSource, setCurrentStreamSource] = useState(activeStreamSource);
+
+  useEffect(() => {
+    setCurrentStreamSource(activeStreamSource);
+  }, [activeStreamSource]);
+
+  const handleToggleStreamSource = () => {
+    const next = currentStreamSource === 'webcam' ? 'screen' : 'webcam';
+    setCurrentStreamSource(next);
+    if (onToggleStreamSource) {
+      onToggleStreamSource(next);
+    }
+  };
 
   // Capture local interviewer webcam for 2-way interview
   useEffect(() => {
@@ -314,15 +327,16 @@ const LiveStream = ({
     >
       {/* Top Stream Bar */}
       <div
+        className="flex items-center justify-between px-4 py-2.5 bg-slate-900/90 border-b border-slate-800 z-20 flex-shrink-0"
         style={{
-          padding: '6px 14px',
-          borderBottom: '1px solid var(--border-subtle)',
+          padding: '8px 14px',
+          borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
-          background: 'var(--bg-surface)',
+          background: 'rgba(15, 23, 42, 0.95)',
           flexShrink: 0,
-          zIndex: 10
+          zIndex: 20
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -334,18 +348,18 @@ const LiveStream = ({
             borderRadius: '6px',
             fontSize: '11px',
             fontWeight: '600',
-            background: streamActive ? 'var(--success-bg)' : 'var(--bg-elevated)',
-            color: streamActive ? 'var(--success)' : 'var(--text-muted)',
-            border: `1px solid ${streamActive ? 'var(--success-border)' : 'var(--border-subtle)'}`
+            background: streamActive ? 'rgba(16, 185, 129, 0.15)' : 'var(--bg-elevated)',
+            color: streamActive ? '#10b981' : 'var(--text-muted)',
+            border: `1px solid ${streamActive ? 'rgba(16, 185, 129, 0.3)' : 'var(--border-subtle)'}`
           }}>
             <span style={{
               width: '6px',
               height: '6px',
               borderRadius: '50%',
-              background: streamActive ? 'var(--success)' : 'var(--text-muted)',
-              boxShadow: streamActive ? '0 0 6px var(--success)' : 'none'
+              background: streamActive ? '#10b981' : 'var(--text-muted)',
+              boxShadow: streamActive ? '0 0 6px #10b981' : 'none'
             }} />
-            <span>{streamActive ? 'Live Video' : interviewerStarted ? 'Waiting for Candidate' : 'Session Ready'}</span>
+            <span>{streamActive ? 'LIVE HD · 30fps' : interviewerStarted ? 'Waiting for Candidate' : 'Session Ready'}</span>
           </div>
 
           {streamActive && (
@@ -363,8 +377,8 @@ const LiveStream = ({
           )}
         </div>
 
-        {/* Video & Audio Controls */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+        {/* Video & Audio Controls - Clean flex group with proper spacing */}
+        <div className="flex items-center gap-2.5 flex-wrap" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
           <button
             onClick={() => setIsSwapped(value => !value)}
             title="Switch primary video view"
@@ -378,6 +392,7 @@ const LiveStream = ({
             <button
               onClick={startInterview}
               className="btn btn-primary btn-sm"
+              style={{ whiteSpace: 'nowrap' }}
             >
               <Radio size={12} />
               <span>Start Interview Broadcast</span>
@@ -402,6 +417,28 @@ const LiveStream = ({
             <span>{isVideoOff ? 'Camera Off' : 'Camera'}</span>
           </button>
 
+          {/* Telemetry Indicator (28ms CAM / SCREEN ACTIVE) - Cleanly inline with buttons */}
+          <div style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            padding: '2px 8px',
+            borderRadius: 6,
+            background: 'rgba(255, 255, 255, 0.05)',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+            fontSize: 10
+          }}>
+            <Wifi size={11} style={{ color: '#10b981' }} />
+            <span style={{ fontFamily: 'JetBrains Mono', fontSize: 10, color: 'var(--text-primary)' }}>
+              28ms
+            </span>
+            {currentStreamSource === 'screen' ? (
+              <span className="badge" style={{ fontSize: 9, padding: '1px 5px', fontWeight: 700, background: '#10b981', color: '#ffffff' }}>SCREEN</span>
+            ) : (
+              <span className="badge badge-secondary" style={{ fontSize: 9, padding: '1px 5px' }}>CAM</span>
+            )}
+          </div>
+
           <button
             onClick={toggleFullscreen}
             title="Toggle fullscreen video"
@@ -415,12 +452,13 @@ const LiveStream = ({
 
       {/* Main Video View Stage */}
       <div
-        className="relative flex-1 w-full min-h-0 bg-[#040711] flex items-center justify-center overflow-hidden aspect-video"
+        className="relative flex-1 w-full min-h-0 bg-slate-950 flex items-center justify-center overflow-hidden"
         style={{
           position: 'relative',
-          background: '#040711',
+          background: '#020617',
           flex: 1,
           width: '100%',
+          height: '100%',
           minHeight: 0,
           display: 'flex',
           alignItems: 'center',
@@ -470,45 +508,45 @@ const LiveStream = ({
           ref={videoRef}
           autoPlay
           playsInline
-          className={`w-full h-full object-contain ${isSwapped ? 'z-20' : 'z-1'}`}
+          className={`w-full h-full object-contain bg-slate-950 ${isSwapped ? 'z-30' : 'z-1'}`}
           style={{
             position: 'absolute',
             inset: isSwapped ? 'auto' : 0,
             bottom: isSwapped ? '16px' : 0,
             right: isSwapped ? '16px' : 0,
-            width: isSwapped ? 'clamp(120px, 15vw, 180px)' : '100%',
-            height: isSwapped ? 'clamp(75px, 10vw, 115px)' : '100%',
+            width: isSwapped ? 'clamp(170px, 20vw, 192px)' : '100%',
+            height: isSwapped ? 'clamp(120px, 15vw, 144px)' : '100%',
             aspectRatio: isSwapped ? '16 / 9' : 'unset',
             objectFit: 'contain',
-            background: '#040711',
-            borderRadius: isSwapped ? 8 : 0,
-            border: isSwapped ? '2px solid var(--primary)' : 'none',
-            boxShadow: isSwapped ? '0 4px 16px rgba(0, 0, 0, 0.65)' : 'none',
+            background: '#020617',
+            borderRadius: isSwapped ? 12 : 0,
+            border: isSwapped ? '2px solid rgba(99, 102, 241, 0.7)' : 'none',
+            boxShadow: isSwapped ? '0 20px 25px -5px rgba(0, 0, 0, 0.5)' : 'none',
             opacity: streamActive && !hasRelayFrame ? 1 : 0,
             transition: 'opacity 0.2s ease',
-            zIndex: isSwapped ? 20 : 1
+            zIndex: isSwapped ? 30 : 1
           }}
         />
 
         {/* Canvas for Socket Relay */}
         <canvas
           ref={relayCanvasRef}
-          className={`w-full h-full object-contain ${isSwapped ? 'z-20' : 'z-2'}`}
+          className={`w-full h-full object-contain bg-slate-950 ${isSwapped ? 'z-30' : 'z-2'}`}
           style={{
             position: 'absolute',
             inset: isSwapped ? 'auto' : 0,
             bottom: isSwapped ? '16px' : 0,
             right: isSwapped ? '16px' : 0,
-            width: isSwapped ? 'clamp(120px, 15vw, 180px)' : '100%',
-            height: isSwapped ? 'clamp(75px, 10vw, 115px)' : '100%',
+            width: isSwapped ? 'clamp(170px, 20vw, 192px)' : '100%',
+            height: isSwapped ? 'clamp(120px, 15vw, 144px)' : '100%',
             aspectRatio: isSwapped ? '16 / 9' : 'unset',
             objectFit: 'contain',
-            background: '#040711',
-            borderRadius: isSwapped ? 8 : 0,
-            border: isSwapped ? '2px solid var(--primary)' : 'none',
-            boxShadow: isSwapped ? '0 4px 16px rgba(0, 0, 0, 0.65)' : 'none',
+            background: '#020617',
+            borderRadius: isSwapped ? 12 : 0,
+            border: isSwapped ? '2px solid rgba(99, 102, 241, 0.7)' : 'none',
+            boxShadow: isSwapped ? '0 20px 25px -5px rgba(0, 0, 0, 0.5)' : 'none',
             display: hasRelayFrame ? 'block' : 'none',
-            zIndex: isSwapped ? 20 : 2
+            zIndex: isSwapped ? 30 : 2
           }}
         />
 
@@ -520,7 +558,7 @@ const LiveStream = ({
               position: 'absolute',
               top: 12,
               left: 12,
-              background: 'rgba(9, 13, 22, 0.85)',
+              background: 'rgba(9, 13, 22, 0.88)',
               backdropFilter: 'blur(8px)',
               WebkitBackdropFilter: 'blur(8px)',
               border: '1px solid var(--border-subtle)',
@@ -537,28 +575,30 @@ const LiveStream = ({
           >
             <User size={12} style={{ color: 'var(--text-muted)' }} />
             <span>{candidateName || 'Candidate'}</span>
-            {activeStreamSource === 'screen' && (
+            {currentStreamSource === 'screen' && (
               <span style={{
-                background: 'rgba(99, 102, 241, 0.25)',
-                border: '1px solid var(--primary)',
-                color: '#818cf8',
+                background: 'rgba(16, 185, 129, 0.2)',
+                border: '1px solid #10b981',
+                color: '#10b981',
                 fontSize: 9,
                 fontWeight: 700,
-                padding: '1px 5px',
+                padding: '1px 6px',
                 borderRadius: 4,
                 letterSpacing: '0.04em'
               }}>
-                SCREEN
+                SCREEN ACTIVE
               </span>
             )}
           </div>
         )}
 
-        {/* Local PiP Interviewer Video */}
+        {/* Local PiP Interviewer Video (Always bounded in bottom-right) */}
         {localStream && (
           <div
-            className={`absolute overflow-hidden rounded-lg shadow-lg ${
-              isSwapped ? 'inset-0 z-1 w-full h-full' : 'bottom-4 right-4 z-20 border-2 border-[var(--border-medium)]'
+            className={`absolute overflow-hidden shadow-2xl ${
+              isSwapped
+                ? 'inset-0 z-1 w-full h-full rounded-none'
+                : 'bottom-4 right-4 z-30 w-44 h-32 sm:w-48 sm:h-36 rounded-xl border-2 border-indigo-500/70 bg-slate-900'
             }`}
             style={{
               position: 'absolute',
@@ -566,15 +606,14 @@ const LiveStream = ({
               right: isSwapped ? 0 : '16px',
               top: isSwapped ? 0 : 'auto',
               left: isSwapped ? 0 : 'auto',
-              width: isSwapped ? '100%' : 'clamp(120px, 15vw, 180px)',
-              height: isSwapped ? '100%' : 'clamp(75px, 10vw, 115px)',
-              aspectRatio: isSwapped ? 'unset' : '16 / 9',
-              borderRadius: isSwapped ? 0 : '8px',
+              width: isSwapped ? '100%' : undefined,
+              height: isSwapped ? '100%' : undefined,
+              borderRadius: isSwapped ? 0 : '12px',
               overflow: 'hidden',
-              border: isSwapped ? 'none' : '2px solid rgba(255, 255, 255, 0.25)',
-              boxShadow: isSwapped ? 'none' : '0 4px 16px rgba(0, 0, 0, 0.65)',
-              zIndex: isSwapped ? 1 : 20,
-              background: '#09101d'
+              border: isSwapped ? 'none' : '2px solid rgba(99, 102, 241, 0.7)',
+              boxShadow: isSwapped ? 'none' : '0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5)',
+              zIndex: isSwapped ? 1 : 30,
+              background: '#0f172a'
             }}
           >
             <video
@@ -582,12 +621,13 @@ const LiveStream = ({
               autoPlay
               muted
               playsInline
-              className="w-full h-full object-contain"
+              className="w-full h-full object-cover object-center"
               style={{
                 width: '100%',
                 height: '100%',
-                objectFit: 'contain',
-                background: '#09101d',
+                objectFit: 'cover',
+                objectPosition: 'center',
+                background: '#0f172a',
                 display: isVideoOff ? 'none' : 'block'
               }}
             />
@@ -599,7 +639,7 @@ const LiveStream = ({
                 flexDirection: 'column',
                 alignItems: 'center',
                 justifyContent: 'center',
-                background: 'var(--bg-card)',
+                background: '#0f172a',
                 color: 'var(--text-muted)',
                 gap: 4
               }}>
@@ -607,21 +647,95 @@ const LiveStream = ({
                 <span style={{ fontSize: 10 }}>Camera Off</span>
               </div>
             )}
-            <div style={{
-              position: 'absolute',
-              bottom: 4,
-              left: 6,
-              fontSize: 10,
-              fontWeight: 700,
-              color: '#ffffff',
-              background: 'rgba(0, 0, 0, 0.75)',
-              padding: '2px 6px',
-              borderRadius: 4,
-              letterSpacing: 0.5,
-              zIndex: 2
-            }}>
+            <div
+              className="absolute bottom-1.5 left-2 text-[10px] px-1.5 py-0.5 rounded bg-black/70 text-white font-bold tracking-wide pointer-events-none z-10"
+              style={{
+                position: 'absolute',
+                bottom: 6,
+                left: 8,
+                fontSize: 10,
+                fontWeight: 700,
+                color: '#ffffff',
+                background: 'rgba(0, 0, 0, 0.7)',
+                padding: '2px 6px',
+                borderRadius: 4,
+                letterSpacing: 0.5,
+                zIndex: 10,
+                pointerEvents: 'none'
+              }}
+            >
               YOU {isMuted ? '• Muted' : ''}
             </div>
+          </div>
+        )}
+
+        {/* Floating Bottom-Center Controls (Rendered in both Split and Feed Focus modes) */}
+        {!compact && (
+          <div
+            className="stream-bottom-controls absolute bottom-4 left-1/2 -translate-x-1/2 z-30 pointer-events-auto flex items-center gap-1.5"
+            style={{
+              position: 'absolute',
+              bottom: 16,
+              left: '50%',
+              transform: 'translateX(-50%)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              background: 'rgba(10, 10, 14, 0.88)',
+              backdropFilter: 'blur(10px)',
+              WebkitBackdropFilter: 'blur(10px)',
+              border: '1px solid rgba(255, 255, 255, 0.16)',
+              borderRadius: 9999,
+              padding: '4px 10px',
+              zIndex: 30,
+              pointerEvents: 'auto',
+              boxShadow: '0 4px 16px rgba(0, 0, 0, 0.6)'
+            }}
+          >
+            {/* View Screen Toggle Button */}
+            <button
+              type="button"
+              onClick={handleToggleStreamSource}
+              className={`btn btn-sm ${currentStreamSource === 'screen' ? 'btn-success active' : 'btn-ghost'}`}
+              style={{
+                padding: '3px 10px',
+                fontSize: 11,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                fontWeight: 600,
+                borderRadius: 9999,
+                background: currentStreamSource === 'screen' ? '#10b981' : 'rgba(255, 255, 255, 0.08)',
+                color: '#ffffff',
+                border: `1px solid ${currentStreamSource === 'screen' ? '#10b981' : 'rgba(255, 255, 255, 0.14)'}`,
+                boxShadow: currentStreamSource === 'screen' ? '0 0 12px rgba(16, 185, 129, 0.5)' : 'none',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                pointerEvents: 'auto'
+              }}
+              title={currentStreamSource === 'screen' ? 'Currently viewing candidate screen share. Click to switch to camera.' : 'Click to view candidate screen share.'}
+            >
+              {currentStreamSource === 'screen' ? <Camera size={12} /> : <Monitor size={12} />}
+              <span>{currentStreamSource === 'screen' ? 'Viewing Screen' : 'View Screen'}</span>
+            </button>
+
+            <span style={{ width: 1, height: 12, background: 'rgba(255, 255, 255, 0.2)' }} />
+
+            {/* Mic Toggle Button */}
+            <button
+              type="button"
+              onClick={toggleMute}
+              className="btn btn-ghost btn-icon btn-sm"
+              style={{
+                color: isMuted ? 'var(--danger)' : '#ffffff',
+                cursor: 'pointer',
+                pointerEvents: 'auto',
+                padding: '2px 6px'
+              }}
+              title={isMuted ? 'Unmute microphone' : 'Mute microphone'}
+            >
+              {isMuted ? <MicOff size={13} style={{ color: '#ef4444' }} /> : <Mic size={13} />}
+            </button>
           </div>
         )}
       </div>

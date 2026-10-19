@@ -2315,7 +2315,10 @@ export default function App() {
         )}
 
         {/* Content Body */}
-        <div className="content-viewport">
+        <div
+          className="content-viewport"
+          style={isTheaterMode ? { padding: 0, overflowY: 'auto', overflowX: 'hidden' } : { overflowY: 'auto', overflowX: 'hidden' }}
+        >
 
           {/* ══════════════════════════════════════════════════════════════
              SECTION: DASHBOARD
@@ -2485,7 +2488,16 @@ export default function App() {
              SECTION: LIVE MONITOR (REVOLUTIONIZED WORKSPACE)
              ══════════════════════════════════════════════════════════════ */}
           {activeSection === 'live' && (
-            <div className="animate-fade-in" style={{ height: isTheaterMode ? '100vh' : 'calc(100vh - 104px)', overflow: 'hidden' }}>
+            <div
+              className="animate-fade-in w-full max-w-full"
+              style={{
+                minHeight: isTheaterMode ? '100vh' : 'calc(100vh - 104px)',
+                width: '100%',
+                maxWidth: '100%',
+                overflowY: 'auto',
+                overflowX: 'hidden'
+              }}
+            >
               <LiveMonitoringView
                 candidates={allCandidates}
                 selectedCandidate={selectedInterview}

@@ -394,7 +394,7 @@ export default function LiveMonitoringView({
       {/* ══════════════════════════════════════════════════════════════════════
          WORKSPACE MAIN CONTENT AREA: DEDICATED FULL VIEW TERMINAL
          ══════════════════════════════════════════════════════════════════════ */}
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative', marginTop: 8, minWidth: 0, width: '100%', maxWidth: '100%' }}>
+      <div style={{ flex: 1, display: 'flex', overflowY: 'auto', overflowX: 'hidden', position: 'relative', marginTop: 8, minWidth: 0, width: '100%', maxWidth: '100%' }}>
         <main
           className="w-full max-w-full min-w-0"
           style={{
@@ -403,7 +403,8 @@ export default function LiveMonitoringView({
             flexDirection: 'column',
             gap: 10,
             padding: 12,
-            overflow: 'hidden',
+            overflowY: 'auto',
+            overflowX: 'hidden',
             minWidth: 0,
             width: '100%',
             maxWidth: '100%'
@@ -570,7 +571,7 @@ export default function LiveMonitoringView({
 
                   {/* Focused Workspace Body */}
                   <div
-                    className="grid grid-cols-1 lg:grid-cols-12 gap-3 w-full max-w-full min-w-0 flex-1 min-h-0 overflow-hidden"
+                    className="grid grid-cols-1 lg:grid-cols-12 gap-3 w-full max-w-full min-w-0 flex-1 min-h-0"
                     style={{
                       display: 'grid',
                       gridTemplateColumns: focusedLayoutMode === 'videoFocus'
@@ -582,14 +583,13 @@ export default function LiveMonitoringView({
                       maxWidth: '100%',
                       minWidth: 0,
                       flex: 1,
-                      minHeight: 0,
-                      overflow: 'hidden'
+                      minHeight: 0
                     }}
                   >
                     {/* Left Stage: 16:9 Stream Feed & AI Follow-Ups */}
                     {(focusedLayoutMode === 'split' || focusedLayoutMode === 'videoFocus') && (
                       <div
-                        className={`flex flex-col gap-2.5 min-w-0 max-w-full min-h-0 overflow-hidden ${
+                        className={`flex flex-col gap-2.5 min-w-0 max-w-full ${
                           focusedLayoutMode === 'videoFocus' ? 'col-span-12' : 'col-span-12 lg:col-span-7'
                         }`}
                         style={{
@@ -598,33 +598,54 @@ export default function LiveMonitoringView({
                           gap: 10,
                           minWidth: 0,
                           maxWidth: '100%',
-                          minHeight: 0,
-                          overflow: 'hidden'
+                          width: '100%'
                         }}
                       >
                         <div
-                          className="card w-full max-w-full min-w-0"
-                          style={{ padding: 0, overflow: 'hidden', flexShrink: 0, width: '100%', maxWidth: '100%' }}
+                          className={`card w-full min-w-0 rounded-xl overflow-hidden bg-slate-950 ${
+                            focusedLayoutMode === 'videoFocus'
+                              ? 'h-[calc(100vh-270px)] min-h-[320px] max-h-[500px]'
+                              : 'h-[calc(100vh-310px)] min-h-[280px] max-h-[440px]'
+                          }`}
+                          style={{
+                            padding: 0,
+                            overflow: 'hidden',
+                            flexShrink: 0,
+                            border: '1px solid var(--border-subtle)',
+                            background: '#020617',
+                            width: '100%',
+                            height: focusedLayoutMode === 'videoFocus' ? 'calc(100vh - 270px)' : 'calc(100vh - 310px)',
+                            minHeight: focusedLayoutMode === 'videoFocus' ? 320 : 280,
+                            maxHeight: focusedLayoutMode === 'videoFocus' ? 500 : 440
+                          }}
                         >
                           <LiveStreamContainer
                             candidate={currentFocusedCandidate}
                             roomId={currentFocusedCandidate.interview_id || currentFocusedCandidate.id}
                             isLive={isLive}
                             compact={false}
+                            layoutMode={focusedLayoutMode}
                           />
                         </div>
 
                         {/* AI Co-Pilot Follow-Up Prompts */}
                         {handleGetAiFollowup && (
                           <div
-                            className="card flex-1 flex flex-col min-h-0 min-w-0 max-w-full overflow-hidden p-3"
-                            style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0, maxWidth: '100%', overflow: 'hidden', padding: 12 }}
+                            className="card flex flex-col min-w-0 w-full max-w-full overflow-hidden p-3"
+                            style={{
+                              display: 'flex',
+                              flexDirection: 'column',
+                              minHeight: 180,
+                              minWidth: 0,
+                              overflow: 'hidden',
+                              padding: 12
+                            }}
                           >
                             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, minWidth: 0, flexShrink: 0 }}>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
                                 <Sparkles size={14} style={{ color: 'var(--primary)', flexShrink: 0 }} />
                                 <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)' }} className="truncate">
-                                  AI Co-Pilot Follow-Ups
+                                   AI Co-Pilot Follow-Ups
                                 </span>
                               </div>
                               <button
@@ -670,7 +691,7 @@ export default function LiveMonitoringView({
                     {/* Right Stage: Synchronized Code & Execution Console */}
                     {(focusedLayoutMode === 'split' || focusedLayoutMode === 'codeFocus') && (
                       <div
-                        className={`card flex flex-col min-w-0 max-w-full min-h-0 overflow-hidden p-0 ${
+                        className={`card flex flex-col min-w-0 max-w-full p-0 ${
                           focusedLayoutMode === 'codeFocus' ? 'col-span-12' : 'col-span-12 lg:col-span-5'
                         }`}
                         style={{
@@ -678,7 +699,8 @@ export default function LiveMonitoringView({
                           flexDirection: 'column',
                           minWidth: 0,
                           maxWidth: '100%',
-                          minHeight: 0,
+                          width: '100%',
+                          minHeight: 480,
                           overflow: 'hidden',
                           padding: 0
                         }}
