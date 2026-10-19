@@ -298,19 +298,21 @@ app.get('/api/interviews/active', async (req, res) => {
         const interviews = await Interview.find({ status: { $in: ['active', 'scheduled'] } })
             .populate('candidateId', 'username fullname email')
             .populate('interviewerId', 'username fullname');
-        const results = interviews.map(i => ({
-            id: i._id,
-            candidate_id: i.candidateId._id,
-            candidate_name: i.candidateId.username,
-            candidate_fullname: i.candidateId.fullname,
-            trust_score: i.trustScore,
-            status: i.status,
-            job_role: i.jobRole,
-            job_level: i.jobLevel,
-            scheduled_at: i.scheduledAt,
-            duration: i.duration,
-            interviewer_name: i.interviewerId?.fullname || ''
-        }));
+        const results = interviews
+            .filter(i => i.candidateId)
+            .map(i => ({
+                id: i._id,
+                candidate_id: i.candidateId?._id,
+                candidate_name: i.candidateId?.username || 'Unknown',
+                candidate_fullname: i.candidateId?.fullname || i.candidateId?.username || 'Candidate',
+                trust_score: i.trustScore !== undefined ? i.trustScore : 100,
+                status: i.status,
+                job_role: i.jobRole || '',
+                job_level: i.jobLevel || 'mid',
+                scheduled_at: i.scheduledAt,
+                duration: i.duration,
+                interviewer_name: i.interviewerId?.fullname || ''
+            }));
         res.json(results);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -518,6 +520,53 @@ app.get('/api/interviews/:id/logs', async (req, res) => {
             severity: l.severity, confidence: l.confidence, details: l.details
         })));
     } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Record a new proctoring violation / anomaly log
+app.post('/api/interviews/:id/logs', async (req, res) => {
+    try {
+        const { event, severity = 'medium', confidence = 1.0, details = '', penalty } = req.body;
+        const interview = await Interview.findById(req.params.id);
+        if (!interview) return res.status(404).json({ error: 'Interview not found' });
+
+        const log = await Log.create({
+            interviewId: interview._id,
+            anomalyType: event || 'ai_vision_flag',
+            severity: severity,
+            confidence: Number(confidence) || 1.0,
+            details: details || `Proctor alert: ${event}`
+        });
+
+        const drop = penalty !== undefined && penalty !== null ? Number(penalty) : (severity === 'high' ? 10 : severity === 'medium' ? 5 : 2);
+        const updatedScore = Math.max(0, (interview.trustScore !== undefined ? interview.trustScore : 100) - drop);
+        await Interview.findByIdAndUpdate(interview._id, { trustScore: updatedScore });
+
+        const alertData = {
+            roomId: String(interview._id),
+            event: event || 'ai_vision_flag',
+            severity: severity,
+            confidence: Number(confidence) || 1.0,
+            details: details || `Proctor alert: ${event}`,
+            timestamp: log.timestamp,
+            logId: log._id,
+            trustScore: updatedScore,
+            penalty: drop
+        };
+
+        if (typeof proctorNamespace !== 'undefined') {
+            proctorNamespace.to(String(interview._id)).emit('proctor_alert', alertData);
+            proctorNamespace.to(String(interview._id)).emit('score_update', {
+                roomId: String(interview._id),
+                score: updatedScore
+            });
+            proctorNamespace.emit('global_proctor_alert', alertData);
+        }
+
+        res.json({ success: true, log, trustScore: updatedScore });
+    } catch (err) {
+        console.error('[PROCTOR] Error logging violation:', err.message);
         res.status(500).json({ error: err.message });
     }
 });

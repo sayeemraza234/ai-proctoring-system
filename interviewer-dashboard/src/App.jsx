@@ -495,7 +495,8 @@ export default function App() {
         role: 'candidate',
         interview_id: params.get('interview') || params.get('interviewId')
       });
-      setView('candidate');
+      const isKiosk = viewParam === 'candidate_kiosk' || params.get('kiosk') === 'true' || viewParam === 'kiosk';
+      setView(isKiosk ? 'candidate_kiosk' : 'candidate');
     }
   }, []);
 
@@ -1701,9 +1702,17 @@ export default function App() {
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12, width: '100%' }}>
               <button
+                onClick={() => setView('candidate_kiosk')}
+                className="btn btn-primary w-full"
+                style={{ width: '100%', background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', color: '#fff' }}
+              >
+                <Camera size={15} />
+                <span>Start In-Browser Assessment Kiosk (AI Proctor)</span>
+              </button>
+              <button
                 onClick={handleLaunchSession}
                 disabled={launchStatus === 'attempting'}
-                className="btn btn-primary w-full"
+                className="btn btn-secondary w-full"
                 style={{ width: '100%' }}
               >
                 <Terminal size={14} />
