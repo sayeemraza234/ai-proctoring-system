@@ -1,8 +1,5 @@
 import React, { useState } from 'react';
-import {
-  Camera, CameraOff, Maximize2, Monitor, Mic, MicOff,
-  Wifi, Shield, Volume2, Radio, RefreshCw, AlertTriangle
-} from 'lucide-react';
+import { Camera, CameraOff, Monitor } from 'lucide-react';
 import LiveStream from './LiveStream';
 
 /**
@@ -31,8 +28,6 @@ export default function LiveStreamContainer({
   onInterviewModeChange
 }) {
   const [activeStreamSource, setActiveStreamSource] = useState(streamType);
-  const [isMuted, setIsMuted] = useState(false);
-  const [showLiveFeed, setShowLiveFeed] = useState(true);
 
   const candidateName = candidate?.candidate_name || candidate?.fullname || 'Candidate';
   const resolvedRoomId = roomId || candidate?.interview_id || candidate?.id;

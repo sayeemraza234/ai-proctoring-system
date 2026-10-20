@@ -39,14 +39,21 @@ const LiveStream = ({
   const relayCanvasRef = useRef(null);
   const peerRef = useRef(null);
   const socketRef = useRef(null);
+  const localStreamRef = useRef(null);
+  const streamRef = localStreamRef; // alias for streamRef.current
+  const isMutedRef = useRef(false);
+  const isVideoOffRef = useRef(false);
 
   const [streamActive, setStreamActive] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [streamDuration, setStreamDuration] = useState(0);
   const [connectionQuality, setConnectionQuality] = useState('waiting');
   const [localStream, setLocalStream] = useState(null);
-  const [isMuted, setIsMuted] = useState(false);
+  const [isMicMuted, setIsMicMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
+  // Aliases for compatibility
+  const isMuted = isMicMuted;
+  const setIsMuted = setIsMicMuted;
   const [hasRelayFrame, setHasRelayFrame] = useState(false);
   const [isSwapped, setIsSwapped] = useState(false);
   const [interviewerStarted, setInterviewerStarted] = useState(false);
@@ -69,56 +76,124 @@ const LiveStream = ({
     }
   };
 
+  // Synchronously update stream state, refs, and attach to peer if active
+  const updateLocalStream = useCallback((stream) => {
+    localStreamRef.current = stream;
+    setLocalStream(stream);
+    if (typeof window !== 'undefined') {
+      window.localStream = stream;
+      window.__interviewerLocalStream = stream;
+    }
+    if (localVideoRef.current && stream) {
+      localVideoRef.current.srcObject = stream;
+      localVideoRef.current.play().catch(() => {});
+    }
+    if (peerRef.current && stream) {
+      try {
+        const existingTrackIds = new Set(peerRef.current.getSenders().map(s => s.track?.id).filter(Boolean));
+        stream.getTracks().forEach(track => {
+          if (track.kind === 'audio' && isMutedRef.current) track.enabled = false;
+          if (track.kind === 'video' && isVideoOffRef.current) track.enabled = false;
+          if (!existingTrackIds.has(track.id)) {
+            peerRef.current.addTrack(track, stream);
+          }
+        });
+      } catch (err) {
+        console.warn('[INTERVIEWER-RTC] Could not attach track to existing peer:', err);
+      }
+    }
+  }, []);
+
   // Helper to ensure interviewer camera & microphone are acquired
-  const ensureLocalMedia = async () => {
-    if (localStream) return localStream;
+  const ensureLocalMedia = useCallback(async () => {
+    let current = localStreamRef.current || localStream || (typeof window !== 'undefined' ? (window.localStream || window.__interviewerLocalStream) : null);
+    if (current) {
+      const liveTracks = current.getTracks().filter(t => t.readyState === 'live');
+      if (liveTracks.length > 0) return current;
+    }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-      setLocalStream(stream);
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = stream;
-        localVideoRef.current.play().catch(() => {});
-      }
+      updateLocalStream(stream);
       return stream;
     } catch (err) {
       console.warn('[INTERVIEWER] Audio+video capture error, falling back to video-only:', err);
       try {
         const vStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
-        setLocalStream(vStream);
-        if (localVideoRef.current) {
-          localVideoRef.current.srcObject = vStream;
-          localVideoRef.current.play().catch(() => {});
-        }
+        updateLocalStream(vStream);
         return vStream;
       } catch (e) {
         console.warn('[INTERVIEWER] Camera access denied:', e);
         return null;
       }
     }
-  };
+  }, [localStream, updateLocalStream]);
+
+  // Robust stream retriever: dynamically acquires audio/video tracks if missing
+  const getActiveStream = useCallback(async (requestedKind = null) => {
+    let stream = localStreamRef.current || localStream || (typeof window !== 'undefined' ? (window.localStream || window.__interviewerLocalStream) : null);
+
+    if (stream) {
+      if (requestedKind === 'audio') {
+        const liveAudio = stream.getAudioTracks().filter(t => t.readyState === 'live');
+        if (liveAudio.length > 0) return stream;
+        try {
+          const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          const newAudioTrack = audioStream.getAudioTracks()[0];
+          if (newAudioTrack) {
+            stream.addTrack(newAudioTrack);
+            if (peerRef.current) {
+              peerRef.current.addTrack(newAudioTrack, stream);
+            }
+            updateLocalStream(stream);
+            return stream;
+          }
+        } catch (err) {
+          console.warn('[INTERVIEWER] Could not dynamically acquire audio track:', err);
+        }
+      } else if (requestedKind === 'video') {
+        const liveVideo = stream.getVideoTracks().filter(t => t.readyState === 'live');
+        if (liveVideo.length > 0) return stream;
+        try {
+          const videoStream = await navigator.mediaDevices.getUserMedia({ video: true });
+          const newVideoTrack = videoStream.getVideoTracks()[0];
+          if (newVideoTrack) {
+            stream.addTrack(newVideoTrack);
+            if (peerRef.current) {
+              peerRef.current.addTrack(newVideoTrack, stream);
+            }
+            updateLocalStream(stream);
+            return stream;
+          }
+        } catch (err) {
+          console.warn('[INTERVIEWER] Could not dynamically acquire video track:', err);
+        }
+      } else {
+        return stream;
+      }
+    }
+
+    try {
+      const freshStream = await ensureLocalMedia();
+      return freshStream;
+    } catch {
+      return null;
+    }
+  }, [localStream, updateLocalStream, ensureLocalMedia]);
 
   // Capture local interviewer webcam for 2-way interview on mount
   useEffect(() => {
     let activeLocalStream = null;
     navigator.mediaDevices.getUserMedia({ video: true, audio: true })
       .then(stream => {
-        setLocalStream(stream);
         activeLocalStream = stream;
-        if (localVideoRef.current) {
-          localVideoRef.current.srcObject = stream;
-          localVideoRef.current.play().catch(() => {});
-        }
+        updateLocalStream(stream);
       })
       .catch(err => {
         console.warn('Interviewer camera/audio access fallback:', err);
         navigator.mediaDevices.getUserMedia({ video: true, audio: false })
           .then(vStream => {
-            setLocalStream(vStream);
             activeLocalStream = vStream;
-            if (localVideoRef.current) {
-              localVideoRef.current.srcObject = vStream;
-              localVideoRef.current.play().catch(() => {});
-            }
+            updateLocalStream(vStream);
           }).catch(() => {});
       });
 
@@ -127,20 +202,22 @@ const LiveStream = ({
         activeLocalStream.getTracks().forEach(track => track.stop());
       }
     };
-  }, []);
+  }, [updateLocalStream]);
 
   // Robust callback ref for local video node
   const setLocalVideoNode = useCallback((node) => {
     localVideoRef.current = node;
-    if (node && localStream) {
-      node.srcObject = localStream;
+    const stream = localStreamRef.current || localStream;
+    if (node && stream) {
+      node.srcObject = stream;
       node.play().catch(() => {});
     }
   }, [localStream]);
 
   useEffect(() => {
-    if (localVideoRef.current && localStream) {
-      localVideoRef.current.srcObject = localStream;
+    const stream = localStreamRef.current || localStream;
+    if (localVideoRef.current && stream) {
+      localVideoRef.current.srcObject = stream;
       localVideoRef.current.play().catch(() => {});
     }
   }, [localStream]);
@@ -158,26 +235,111 @@ const LiveStream = ({
   }, [streamActive]);
 
   // Toggle Mute Audio
-  const toggleMute = () => {
-    if (localStream) {
-      const audioTrack = localStream.getAudioTracks()[0];
-      if (audioTrack) {
-        audioTrack.enabled = !audioTrack.enabled;
-        setIsMuted(!audioTrack.enabled);
-      }
+  const toggleMute = useCallback(async () => {
+    let stream = localStreamRef.current || localStream || (typeof window !== 'undefined' ? (window.localStream || window.__interviewerLocalStream) : null);
+    if (!stream || stream.getAudioTracks().length === 0) {
+      stream = await getActiveStream('audio');
     }
-  };
+
+    if (!stream) {
+      const nextState = !isMicMuted;
+      setIsMicMuted(nextState);
+      isMutedRef.current = nextState;
+      return;
+    }
+
+    const audioTracks = stream.getAudioTracks();
+    if (audioTracks.length === 0) {
+      const nextState = !isMicMuted;
+      setIsMicMuted(nextState);
+      isMutedRef.current = nextState;
+      return;
+    }
+
+    // Toggle: if currently muted (isMicMuted = true), we unmute (targetEnabled = true)
+    // If currently unmuted, we mute (targetEnabled = false)
+    const targetEnabled = isMicMuted;
+    audioTracks.forEach(track => {
+      track.enabled = targetEnabled;
+    });
+
+    if (peerRef.current) {
+      peerRef.current.getSenders().forEach(sender => {
+        if (sender.track && sender.track.kind === 'audio') {
+          sender.track.enabled = targetEnabled;
+        }
+      });
+    }
+
+    const newMuted = !targetEnabled;
+    setIsMicMuted(newMuted);
+    isMutedRef.current = newMuted;
+
+    if (socketRef.current && roomId) {
+      socketRef.current.emit('call_action', {
+        roomId: String(roomId),
+        action: 'interviewer_media_state',
+        isMicMuted: newMuted,
+        isVideoOff: isVideoOffRef.current
+      });
+    }
+  }, [isMicMuted, localStream, getActiveStream, roomId]);
 
   // Toggle Video Off
-  const toggleVideo = () => {
-    if (localStream) {
-      const videoTrack = localStream.getVideoTracks()[0];
-      if (videoTrack) {
-        videoTrack.enabled = !videoTrack.enabled;
-        setIsVideoOff(!videoTrack.enabled);
-      }
+  const toggleVideo = useCallback(async () => {
+    let stream = localStreamRef.current || localStream || (typeof window !== 'undefined' ? (window.localStream || window.__interviewerLocalStream) : null);
+    if (!stream || stream.getVideoTracks().length === 0) {
+      stream = await getActiveStream('video');
     }
-  };
+
+    if (!stream) {
+      const nextState = !isVideoOff;
+      setIsVideoOff(nextState);
+      isVideoOffRef.current = nextState;
+      return;
+    }
+
+    const videoTracks = stream.getVideoTracks();
+    if (videoTracks.length === 0) {
+      const nextState = !isVideoOff;
+      setIsVideoOff(nextState);
+      isVideoOffRef.current = nextState;
+      return;
+    }
+
+    // Toggle: if currently video is off (isVideoOff = true), we turn on (targetEnabled = true)
+    // If currently video is on, we turn off (targetEnabled = false)
+    const targetEnabled = isVideoOff;
+    videoTracks.forEach(track => {
+      track.enabled = targetEnabled;
+    });
+
+    if (peerRef.current) {
+      peerRef.current.getSenders().forEach(sender => {
+        if (sender.track && sender.track.kind === 'video') {
+          sender.track.enabled = targetEnabled;
+        }
+      });
+    }
+
+    const newVideoOff = !targetEnabled;
+    setIsVideoOff(newVideoOff);
+    isVideoOffRef.current = newVideoOff;
+
+    if (targetEnabled && localVideoRef.current) {
+      localVideoRef.current.srcObject = stream;
+      localVideoRef.current.play().catch(() => {});
+    }
+
+    if (socketRef.current && roomId) {
+      socketRef.current.emit('call_action', {
+        roomId: String(roomId),
+        action: 'interviewer_media_state',
+        isMicMuted: isMutedRef.current,
+        isVideoOff: newVideoOff
+      });
+    }
+  }, [isVideoOff, localStream, getActiveStream, roomId]);
 
   const handleSetInterviewMode = (newMode) => {
     setInterviewMode(newMode);
@@ -197,7 +359,7 @@ const LiveStream = ({
   };
 
   const startInterview = async () => {
-    let stream = localStream;
+    let stream = localStreamRef.current || localStream;
     if (!stream) {
       stream = await ensureLocalMedia();
     }
@@ -217,6 +379,12 @@ const LiveStream = ({
       try {
         const existingTrackIds = new Set(peerRef.current.getSenders().map(s => s.track?.id).filter(Boolean));
         stream.getTracks().forEach(track => {
+          if (track.kind === 'audio' && isMutedRef.current) {
+            track.enabled = false;
+          }
+          if (track.kind === 'video' && isVideoOffRef.current) {
+            track.enabled = false;
+          }
           if (!existingTrackIds.has(track.id)) {
             peerRef.current.addTrack(track, stream);
           }
@@ -256,9 +424,16 @@ const LiveStream = ({
       const pc = new RTCPeerConnection(rtcConfig);
       peerRef.current = pc;
 
-      if (localStream) {
-        localStream.getTracks().forEach(track => {
-          pc.addTrack(track, localStream);
+      const streamToAdd = localStreamRef.current || localStream;
+      if (streamToAdd) {
+        streamToAdd.getTracks().forEach(track => {
+          if (track.kind === 'audio' && isMutedRef.current) {
+            track.enabled = false;
+          }
+          if (track.kind === 'video' && isVideoOffRef.current) {
+            track.enabled = false;
+          }
+          pc.addTrack(track, streamToAdd);
         });
       }
 
@@ -370,7 +545,7 @@ const LiveStream = ({
 
     // Interviewer periodic frame relay to candidate
     const relayInterval = setInterval(() => {
-      if (localVideoRef.current && localVideoRef.current.videoWidth > 0) {
+      if (!isVideoOffRef.current && localVideoRef.current && localVideoRef.current.videoWidth > 0) {
         try {
           const tempCanvas = document.createElement('canvas');
           tempCanvas.width = 320;
@@ -394,7 +569,7 @@ const LiveStream = ({
       }
       socket.disconnect();
     };
-  }, [roomId, localStream]);
+  }, [roomId]);
 
   // Fullscreen
   const toggleFullscreen = () => {
@@ -506,19 +681,35 @@ const LiveStream = ({
 
           <button
             onClick={toggleMute}
-            title={isMuted ? 'Unmute microphone' : 'Mute microphone'}
-            className={`btn btn-sm ${isMuted ? 'btn-danger-outline' : 'btn-secondary'}`}
+            title={isMicMuted ? 'Unmute microphone' : 'Mute microphone'}
+            className={`btn btn-sm ${isMicMuted ? 'btn-danger' : 'btn-secondary'}`}
+            style={{
+              background: isMicMuted ? '#ef4444' : undefined,
+              color: isMicMuted ? '#ffffff' : undefined,
+              borderColor: isMicMuted ? '#dc2626' : undefined,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
           >
-            {isMuted ? <MicOff size={13} /> : <Mic size={13} />}
-            <span>{isMuted ? 'Muted' : 'Mic'}</span>
+            {isMicMuted ? <MicOff size={13} style={{ color: '#ffffff' }} /> : <Mic size={13} style={{ color: '#10b981' }} />}
+            <span>{isMicMuted ? 'Muted' : 'Mic'}</span>
           </button>
 
           <button
             onClick={toggleVideo}
             title={isVideoOff ? 'Turn camera on' : 'Turn camera off'}
-            className={`btn btn-sm ${isVideoOff ? 'btn-danger-outline' : 'btn-secondary'}`}
+            className={`btn btn-sm ${isVideoOff ? 'btn-danger' : 'btn-secondary'}`}
+            style={{
+              background: isVideoOff ? '#ef4444' : undefined,
+              color: isVideoOff ? '#ffffff' : undefined,
+              borderColor: isVideoOff ? '#dc2626' : undefined,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px'
+            }}
           >
-            {isVideoOff ? <CameraOff size={13} /> : <Camera size={13} />}
+            {isVideoOff ? <CameraOff size={13} style={{ color: '#ffffff' }} /> : <Camera size={13} style={{ color: '#10b981' }} />}
             <span>{isVideoOff ? 'Camera Off' : 'Camera'}</span>
           </button>
 
@@ -846,16 +1037,54 @@ const LiveStream = ({
             <button
               type="button"
               onClick={toggleMute}
-              className="btn btn-ghost btn-icon btn-sm"
+              className={`btn btn-sm ${isMicMuted ? 'btn-danger' : 'btn-ghost'}`}
               style={{
-                color: isMuted ? 'var(--danger)' : '#ffffff',
+                padding: '3px 9px',
+                fontSize: 11,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                fontWeight: 600,
+                borderRadius: 9999,
+                background: isMicMuted ? '#ef4444' : 'rgba(255, 255, 255, 0.08)',
+                color: '#ffffff',
+                border: `1px solid ${isMicMuted ? '#dc2626' : 'rgba(255, 255, 255, 0.14)'}`,
+                boxShadow: isMicMuted ? '0 0 10px rgba(239, 68, 68, 0.5)' : 'none',
                 cursor: 'pointer',
                 pointerEvents: 'auto',
-                padding: '2px 6px'
+                transition: 'all 0.2s ease'
               }}
-              title={isMuted ? 'Unmute microphone' : 'Mute microphone'}
+              title={isMicMuted ? 'Unmute microphone' : 'Mute microphone'}
             >
-              {isMuted ? <MicOff size={13} style={{ color: '#ef4444' }} /> : <Mic size={13} />}
+              {isMicMuted ? <MicOff size={13} style={{ color: '#ffffff' }} /> : <Mic size={13} style={{ color: '#10b981' }} />}
+              <span>{isMicMuted ? 'Muted' : 'Mic'}</span>
+            </button>
+
+            {/* Camera Toggle Button */}
+            <button
+              type="button"
+              onClick={toggleVideo}
+              className={`btn btn-sm ${isVideoOff ? 'btn-danger' : 'btn-ghost'}`}
+              style={{
+                padding: '3px 9px',
+                fontSize: 11,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                fontWeight: 600,
+                borderRadius: 9999,
+                background: isVideoOff ? '#ef4444' : 'rgba(255, 255, 255, 0.08)',
+                color: '#ffffff',
+                border: `1px solid ${isVideoOff ? '#dc2626' : 'rgba(255, 255, 255, 0.14)'}`,
+                boxShadow: isVideoOff ? '0 0 10px rgba(239, 68, 68, 0.5)' : 'none',
+                cursor: 'pointer',
+                pointerEvents: 'auto',
+                transition: 'all 0.2s ease'
+              }}
+              title={isVideoOff ? 'Turn camera on' : 'Turn camera off'}
+            >
+              {isVideoOff ? <CameraOff size={13} style={{ color: '#ffffff' }} /> : <Camera size={13} style={{ color: '#10b981' }} />}
+              <span>{isVideoOff ? 'Cam Off' : 'Camera'}</span>
             </button>
           </div>
         )}
