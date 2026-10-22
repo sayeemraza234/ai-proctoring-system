@@ -48,28 +48,27 @@ function ts() {
 
 // ─── SCREEN 1: LOGIN ──────────────────────────────────────────────────────────
 async function doLogin() {
-    const username = document.getElementById('login-username').value.trim();
-    const password = document.getElementById('login-password').value.trim();
+    const usernameInput = document.getElementById('login-username');
+    const passwordInput = document.getElementById('login-password');
+    const username = (usernameInput?.value || '').trim();
+    const password = (passwordInput?.value || '').trim();
     const errBox   = document.getElementById('login-error');
     const btn      = document.getElementById('login-btn');
     const btnText  = document.getElementById('login-btn-text');
     const spinner  = document.getElementById('login-spinner');
 
-    const usernameInput = document.getElementById('login-username');
     const usernameErrorEl = document.getElementById('login-username-error');
+    const passwordErrorEl = document.getElementById('login-password-error');
 
-    if (!username || !password) {
-        errBox.textContent = 'Please enter your username and password.';
-        errBox.classList.remove('hidden');
-        return;
-    }
+    const USERNAME_REGEX = /^[a-zA-Z][a-zA-Z0-9_]{2,24}$/;
+    const PASSWORD_REGEX = /^(?=.*[a-zA-Z])(?=.*[0-9!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]).{8,}$/;
 
-    const NAME_REGEX = /^[A-Za-z]+(?:[\s.]+[A-Za-z]+)*$/;
-    const isValidName = username.length >= 2 && username.length <= 50 && NAME_REGEX.test(username);
+    let hasError = false;
 
-    if (!isValidName) {
+    if (!username || !USERNAME_REGEX.test(username)) {
+        hasError = true;
         if (usernameErrorEl) {
-            usernameErrorEl.textContent = 'Please enter a valid name using only alphabets (numbers are not allowed).';
+            usernameErrorEl.textContent = 'Username must start with a letter and be 3–25 characters (letters, numbers, underscores only).';
             usernameErrorEl.classList.remove('hidden');
         }
         if (usernameInput) {
@@ -77,9 +76,6 @@ async function doLogin() {
             usernameInput.style.boxShadow = '0 0 0 1px #ef4444';
             usernameInput.focus();
         }
-        errBox.textContent = 'Please enter a valid name using only alphabets (numbers are not allowed).';
-        errBox.classList.remove('hidden');
-        return;
     } else {
         if (usernameErrorEl) {
             usernameErrorEl.textContent = '';
@@ -89,6 +85,34 @@ async function doLogin() {
             usernameInput.style.borderColor = '';
             usernameInput.style.boxShadow = '';
         }
+    }
+
+    if (!password || !PASSWORD_REGEX.test(password)) {
+        hasError = true;
+        if (passwordErrorEl) {
+            passwordErrorEl.textContent = 'Password must be at least 8 characters long and include both letters and numbers.';
+            passwordErrorEl.classList.remove('hidden');
+        }
+        if (passwordInput) {
+            passwordInput.style.borderColor = '#ef4444';
+            passwordInput.style.boxShadow = '0 0 0 1px #ef4444';
+            if (!usernameInput?.style.borderColor) passwordInput.focus();
+        }
+    } else {
+        if (passwordErrorEl) {
+            passwordErrorEl.textContent = '';
+            passwordErrorEl.classList.add('hidden');
+        }
+        if (passwordInput) {
+            passwordInput.style.borderColor = '';
+            passwordInput.style.boxShadow = '';
+        }
+    }
+
+    if (hasError) {
+        errBox.textContent = 'Please fix the errors indicated below.';
+        errBox.classList.remove('hidden');
+        return;
     }
 
     errBox.classList.add('hidden');
@@ -214,22 +238,42 @@ document.getElementById('login-username').addEventListener('keydown', e => {
     if (e.key === 'Enter') document.getElementById('login-password').focus();
 });
 
-// Real-time input constraint: only letters, spaces, and dot
+// Real-time input constraints & error clearing
 const loginUsernameInputEl = document.getElementById('login-username');
 if (loginUsernameInputEl) {
     loginUsernameInputEl.addEventListener('input', (e) => {
-        const filtered = e.target.value.replace(/[^a-zA-Z\s.]/g, '');
+        let filtered = e.target.value.replace(/[^a-zA-Z0-9_]/g, '');
+        if (filtered.length > 0 && !/^[a-zA-Z]/.test(filtered)) {
+            filtered = filtered.replace(/^[^a-zA-Z]+/, '');
+        }
+        filtered = filtered.slice(0, 25);
         if (e.target.value !== filtered) {
             e.target.value = filtered;
         }
         const errEl = document.getElementById('login-username-error');
         if (errEl && !errEl.classList.contains('hidden')) {
             const trimmed = filtered.trim();
-            if (trimmed.length >= 2 && /^[A-Za-z]+(?:[\s.]+[A-Za-z]+)*$/.test(trimmed)) {
+            if (/^[a-zA-Z][a-zA-Z0-9_]{2,24}$/.test(trimmed)) {
                 errEl.textContent = '';
                 errEl.classList.add('hidden');
                 loginUsernameInputEl.style.borderColor = '';
                 loginUsernameInputEl.style.boxShadow = '';
+            }
+        }
+    });
+}
+
+const loginPasswordInputEl = document.getElementById('login-password');
+if (loginPasswordInputEl) {
+    loginPasswordInputEl.addEventListener('input', (e) => {
+        const val = e.target.value;
+        const errEl = document.getElementById('login-password-error');
+        if (errEl && !errEl.classList.contains('hidden')) {
+            if (/^(?=.*[a-zA-Z])(?=.*[0-9!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]).{8,}$/.test(val)) {
+                errEl.textContent = '';
+                errEl.classList.add('hidden');
+                loginPasswordInputEl.style.borderColor = '';
+                loginPasswordInputEl.style.boxShadow = '';
             }
         }
     });

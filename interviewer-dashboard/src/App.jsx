@@ -39,13 +39,78 @@ const formatTimer = (secs) => {
 };
 const formatDate = (d) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
 
-// ── Strict Name Validation (Alphabetic characters, spaces, and dot initials only) ──
-const NAME_REGEX = /^[A-Za-z]+(?:[\s.]+[A-Za-z]+)*$/;
-const isValidName = (name) => {
-  if (!name || typeof name !== 'string') return false;
-  const trimmed = name.trim();
-  return trimmed.length >= 2 && trimmed.length <= 50 && NAME_REGEX.test(trimmed);
+// ── Strict Field Validation Functions & Regexes ─────────────────────────────
+const USERNAME_REGEX = /^[a-zA-Z][a-zA-Z0-9_]{2,24}$/;
+const PASSWORD_REGEX = /^(?=.*[a-zA-Z])(?=.*[0-9!@#$%^&*()_+\-=[\]{};':"\\|,.<>/?]).{8,}$/;
+const FULLNAME_REGEX = /^[A-Za-z]+(?:[\s.]+[A-Za-z]+)*$/;
+const EMAIL_REGEX = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+const PHONE_REGEX = /^[6-9]\d{9}$/;
+const COMPANY_REGEX = /^(?=.*[a-zA-Z])[a-zA-Z\s&.-]{2,60}$/;
+const JOBTITLE_REGEX = /^[a-zA-Z][a-zA-Z\s/-]{2,50}$/;
+
+const validateUsername = (val) => {
+  if (!val || typeof val !== 'string') return "Username must start with a letter and be 3–25 characters (letters, numbers, underscores only).";
+  const trimmed = val.trim();
+  if (!USERNAME_REGEX.test(trimmed)) {
+    return "Username must start with a letter and be 3–25 characters (letters, numbers, underscores only).";
+  }
+  return "";
 };
+
+const validatePassword = (val) => {
+  if (!val || typeof val !== 'string') return "Password must be at least 8 characters long and include both letters and numbers.";
+  if (!PASSWORD_REGEX.test(val)) {
+    return "Password must be at least 8 characters long and include both letters and numbers.";
+  }
+  return "";
+};
+
+const validateFullName = (val) => {
+  if (!val || typeof val !== 'string') return "Full Name must contain only alphabets (numbers and symbols are not allowed).";
+  const trimmed = val.trim();
+  if (trimmed.length < 3 || !FULLNAME_REGEX.test(trimmed)) {
+    return "Full Name must contain only alphabets (numbers and symbols are not allowed).";
+  }
+  return "";
+};
+
+const validateEmail = (val) => {
+  if (!val || typeof val !== 'string') return "Please enter a valid email address (e.g., name@domain.com).";
+  const trimmed = val.trim();
+  if (!EMAIL_REGEX.test(trimmed)) {
+    return "Please enter a valid email address (e.g., name@domain.com).";
+  }
+  return "";
+};
+
+const validatePhone = (val) => {
+  if (!val || typeof val !== 'string') return "Phone number must be a valid 10-digit mobile number (numbers only).";
+  const trimmed = val.trim();
+  if (!PHONE_REGEX.test(trimmed)) {
+    return "Phone number must be a valid 10-digit mobile number (numbers only).";
+  }
+  return "";
+};
+
+const validateCompany = (val) => {
+  if (!val || typeof val !== 'string') return "Company name must contain only alphabets and valid characters (numbers are not allowed).";
+  const trimmed = val.trim();
+  if (!COMPANY_REGEX.test(trimmed)) {
+    return "Company name must contain only alphabets and valid characters (numbers are not allowed).";
+  }
+  return "";
+};
+
+const validateJobTitle = (val) => {
+  if (!val || typeof val !== 'string') return "Job Title must contain only alphabets (numbers are not allowed).";
+  const trimmed = val.trim();
+  if (!JOBTITLE_REGEX.test(trimmed)) {
+    return "Job Title must contain only alphabets (numbers are not allowed).";
+  }
+  return "";
+};
+
+const isValidName = (name) => !validateFullName(name);
 
 // ── Toast Notification ────────────────────────────────────────────────────────
 function Toast({ toasts, removeToast }) {
@@ -258,8 +323,8 @@ export default function App() {
   const [showPassword, setShowPassword] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
   const [error, setError] = useState('');
-  const [usernameError, setUsernameError] = useState('');
-  const [fullnameError, setFullnameError] = useState('');
+  const [formErrors, setFormErrors] = useState({});
+  const [candidateModalErrors, setCandidateModalErrors] = useState({});
   const [isLoading, setIsLoading] = useState(false);
   const [isRegistering, setIsRegistering] = useState(false);
   const [fullname, setFullname] = useState('');
@@ -625,40 +690,54 @@ export default function App() {
     e.preventDefault();
     setError('');
 
-    let hasError = false;
-    if (!isValidName(username)) {
-      setUsernameError('Please enter a valid name using only alphabets (numbers are not allowed).');
-      hasError = true;
+    const errors = {};
+    const uErr = validateUsername(username);
+    if (uErr) errors.username = uErr;
+
+    if (isRegistering) {
+      const pErr = validatePassword(password);
+      if (pErr) errors.password = pErr;
+
+      const fErr = validateFullName(fullname);
+      if (fErr) errors.fullname = fErr;
+
+      const eErr = validateEmail(email);
+      if (eErr) errors.email = eErr;
+
+      const phErr = validatePhone(phone);
+      if (phErr) errors.phone = phErr;
+
+      if (isInterviewer) {
+        const cErr = validateCompany(company);
+        if (cErr) errors.company = cErr;
+
+        const jErr = validateJobTitle(jobTitle);
+        if (jErr) errors.jobTitle = jErr;
+      }
+
+      if (!isInterviewer && (!candidateRefFace || !candidateRefFace.snapshot)) {
+        errors.refFace = 'Please capture your reference face portrait to complete registration.';
+      }
     } else {
-      setUsernameError('');
-    }
-
-    if (isRegistering && !isValidName(fullname)) {
-      setFullnameError('Please enter a valid name using only alphabets (numbers are not allowed).');
-      hasError = true;
-    } else {
-      setFullnameError('');
-    }
-
-    if (hasError) {
-      setError('Please enter a valid name using only alphabets (numbers are not allowed).');
-      return;
-    }
-
-    if (isRegistering && loginRole === 'candidate') {
-      if (!candidateRefFace || !candidateRefFace.snapshot) {
-        setError('Please capture your reference face portrait to complete registration.');
-        return;
+      if (!password || password.trim().length === 0) {
+        errors.password = 'Please enter your password.';
       }
     }
+
+    if (Object.keys(errors).length > 0) {
+      setFormErrors(errors);
+      setError(Object.values(errors)[0]);
+      return;
+    }
+    setFormErrors({});
 
     setIsLoading(true);
     try {
       if (isRegistering) {
         const endpoint = loginRole === 'interviewer' ? `${BACKEND}/api/interviewers` : `${BACKEND}/api/candidates`;
         const body = loginRole === 'interviewer'
-          ? { username: username.trim(), password, fullname: fullname.trim(), email, phone, company, job_title: jobTitle, department, linkedIn }
-          : { username: username.trim(), password, fullname: fullname.trim(), email, phone };
+          ? { username: username.trim(), password, fullname: fullname.trim(), email: email.trim(), phone: phone.trim(), company: company.trim(), job_title: jobTitle.trim(), department, linkedIn }
+          : { username: username.trim(), password, fullname: fullname.trim(), email: email.trim(), phone: phone.trim() };
         const res = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         if (!res.ok) { const d = await res.json(); setError(d.error || 'Registration failed'); setIsLoading(false); return; }
         const user = await res.json();
@@ -696,8 +775,8 @@ export default function App() {
       setView(user.role);
     }
     setUsername(''); setPassword('');
-    setFullname(''); setEmail(''); setCompany(''); setJobTitle('');
-    setUsernameError(''); setFullnameError('');
+    setFullname(''); setEmail(''); setCompany(''); setJobTitle(''); setPhone('');
+    setFormErrors({});
     setCandidateRefFace(null);
   };
 
@@ -736,31 +815,35 @@ export default function App() {
   // ── Candidate CRUD ─────────────────────────────────────────────────────────
   const handleCreateCandidate = async (e) => {
     e.preventDefault();
-    let hasError = false;
+    const errors = {};
+    const uErr = validateUsername(newCandidateName);
+    if (uErr) errors.username = uErr;
 
-    if (!isValidName(newCandidateName)) {
-      setNewCandidateNameError('Please enter a valid name using only alphabets (numbers are not allowed).');
-      hasError = true;
-    } else {
-      setNewCandidateNameError('');
+    if (newCandidateFullname.trim()) {
+      const fErr = validateFullName(newCandidateFullname);
+      if (fErr) errors.fullname = fErr;
     }
 
-    if (newCandidateFullname.trim() && !isValidName(newCandidateFullname)) {
-      setNewCandidateFullnameError('Please enter a valid name using only alphabets (numbers are not allowed).');
-      hasError = true;
-    } else {
-      setNewCandidateFullnameError('');
+    if (newCandidateEmail.trim()) {
+      const eErr = validateEmail(newCandidateEmail);
+      if (eErr) errors.email = eErr;
     }
 
-    if (hasError) {
-      addToast('Please enter a valid name using only alphabets (numbers are not allowed).', 'error');
+    const pErr = validatePassword(newCandidatePass);
+    if (pErr) errors.password = pErr;
+
+    if (newCandidateJobRole.trim()) {
+      const jErr = validateJobTitle(newCandidateJobRole);
+      if (jErr) errors.jobRole = jErr;
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setCandidateModalErrors(errors);
+      addToast(Object.values(errors)[0], 'error');
       return;
     }
+    setCandidateModalErrors({});
 
-    if (newCandidatePass.length < 6) {
-      addToast('Password must be at least 6 characters.', 'error');
-      return;
-    }
     try {
       const res = await fetch(`${BACKEND}/api/candidates`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -768,7 +851,7 @@ export default function App() {
           username: newCandidateName.trim(),
           password: newCandidatePass,
           fullname: newCandidateFullname.trim() || newCandidateName.trim(),
-          email: newCandidateEmail
+          email: newCandidateEmail.trim()
         })
       });
       if (!res.ok) { const d = await res.json(); addToast(d.error || 'Failed to create candidate', 'error'); return; }
@@ -776,7 +859,7 @@ export default function App() {
 
       await fetch(`${BACKEND}/api/interviews`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ candidateId: candidate._id || candidate.id, interviewerId: currentUser?._id, jobRole: newCandidateJobRole, status: 'active' })
+        body: JSON.stringify({ candidateId: candidate._id || candidate.id, interviewerId: currentUser?._id, jobRole: newCandidateJobRole.trim(), status: 'active' })
       });
 
       addToast(`Candidate ${newCandidateName.trim()} registered`, 'success');
@@ -785,8 +868,8 @@ export default function App() {
         if (newCandidateEmail.trim()) saveReferenceFace(newCandidateEmail.trim(), newCandidateRefFace);
       }
       setIsAddCandidateOpen(false);
-      setNewCandidateName(''); setNewCandidateFullname(''); setNewCandidateEmail(''); setNewCandidatePass('');
-      setNewCandidateNameError(''); setNewCandidateFullnameError(''); setNewCandidateRefFace(null);
+      setNewCandidateName(''); setNewCandidateFullname(''); setNewCandidateEmail(''); setNewCandidatePass(''); setNewCandidateJobRole('');
+      setCandidateModalErrors({}); setNewCandidateRefFace(null);
       fetchCandidates();
     } catch { addToast('Server error while registering candidate', 'error'); }
   };
@@ -1614,7 +1697,7 @@ export default function App() {
         <Toast toasts={toasts} removeToast={removeToast} />
         <div className="card-elevated" style={{ width: '100%', maxWidth: isRegistering && isInterviewer ? 560 : 420, padding: 32, borderRadius: 14 }}>
           <button
-            onClick={() => { setView('landing'); setIsRegistering(false); setError(''); setUsernameError(''); setFullnameError(''); }}
+            onClick={() => { setView('landing'); setIsRegistering(false); setError(''); setFormErrors({}); }}
             className="btn btn-ghost btn-sm"
             style={{ marginBottom: 20, padding: 0 }}
           >
@@ -1638,30 +1721,34 @@ export default function App() {
 
           <form onSubmit={handleAuthSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div className="form-group">
-              <label className="form-label">{isRegistering ? 'Username / Handle' : 'Username or Full Name'}</label>
+              <label className="form-label">{isRegistering ? 'Username / Handle' : 'Username or Handle'}</label>
               <input
                 type="text"
                 required
-                pattern="^[A-Za-z\s.]{2,50}$"
-                title="Name must contain only alphabets and be at least 2 characters long."
+                pattern="^[a-zA-Z][a-zA-Z0-9_]{2,24}$"
+                title="Username must start with a letter and be 3–25 characters (letters, numbers, underscores only)."
                 value={username}
                 onChange={e => {
-                  const filtered = e.target.value.replace(/[^a-zA-Z\s.]/g, '');
+                  let filtered = e.target.value.replace(/[^a-zA-Z0-9_]/g, '');
+                  if (filtered.length > 0 && !/^[a-zA-Z]/.test(filtered)) {
+                    filtered = filtered.replace(/^[^a-zA-Z]+/, '');
+                  }
+                  filtered = filtered.slice(0, 25);
                   setUsername(filtered);
-                  if (usernameError && isValidName(filtered)) {
-                    setUsernameError('');
+                  if (formErrors.username) {
+                    setFormErrors(prev => ({ ...prev, username: validateUsername(filtered) }));
                   }
                 }}
                 placeholder="e.g. johndoe"
-                className={`form-input ${usernameError ? 'border-red-500 focus:ring-red-500' : ''}`}
+                className={`form-input ${formErrors.username ? 'border-red-500 focus:ring-red-500' : ''}`}
                 style={{
-                  borderColor: usernameError ? '#ef4444' : undefined,
-                  boxShadow: usernameError ? '0 0 0 1px #ef4444' : undefined
+                  borderColor: formErrors.username ? '#ef4444' : undefined,
+                  boxShadow: formErrors.username ? '0 0 0 1px #ef4444' : undefined
                 }}
               />
-              {usernameError && (
-                <div style={{ color: '#ef4444', fontSize: 11, marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <span>{usernameError}</span>
+              {formErrors.username && (
+                <div style={{ color: '#ef4444', fontSize: 11, marginTop: 4 }}>
+                  {formErrors.username}
                 </div>
               )}
             </div>
@@ -1673,10 +1760,23 @@ export default function App() {
                   type={showPassword ? 'text' : 'password'}
                   required
                   value={password}
-                  onChange={e => setPassword(e.target.value)}
+                  onChange={e => {
+                    const val = e.target.value;
+                    setPassword(val);
+                    if (formErrors.password) {
+                      setFormErrors(prev => ({
+                        ...prev,
+                        password: isRegistering ? validatePassword(val) : (val ? '' : 'Please enter your password.')
+                      }));
+                    }
+                  }}
                   placeholder="••••••••"
-                  className="form-input"
-                  style={{ paddingRight: 36 }}
+                  className={`form-input ${formErrors.password ? 'border-red-500 focus:ring-red-500' : ''}`}
+                  style={{
+                    paddingRight: 36,
+                    borderColor: formErrors.password ? '#ef4444' : undefined,
+                    boxShadow: formErrors.password ? '0 0 0 1px #ef4444' : undefined
+                  }}
                 />
                 <button
                   type="button"
@@ -1687,6 +1787,11 @@ export default function App() {
                   {showPassword ? <EyeOff size={14} /> : <Eye size={14} />}
                 </button>
               </div>
+              {formErrors.password && (
+                <div style={{ color: '#ef4444', fontSize: 11, marginTop: 4 }}>
+                  {formErrors.password}
+                </div>
+              )}
             </div>
 
             {isRegistering && (
@@ -1696,36 +1801,78 @@ export default function App() {
                   <input
                     required
                     type="text"
-                    pattern="^[A-Za-z\s.]{2,50}$"
-                    title="Name must contain only alphabets and be at least 2 characters long."
                     value={fullname}
                     onChange={e => {
                       const filtered = e.target.value.replace(/[^a-zA-Z\s.]/g, '');
                       setFullname(filtered);
-                      if (fullnameError && isValidName(filtered)) {
-                        setFullnameError('');
+                      if (formErrors.fullname) {
+                        setFormErrors(prev => ({ ...prev, fullname: validateFullName(filtered) }));
                       }
                     }}
                     placeholder="John Doe"
-                    className={`form-input ${fullnameError ? 'border-red-500 focus:ring-red-500' : ''}`}
+                    className={`form-input ${formErrors.fullname ? 'border-red-500 focus:ring-red-500' : ''}`}
                     style={{
-                      borderColor: fullnameError ? '#ef4444' : undefined,
-                      boxShadow: fullnameError ? '0 0 0 1px #ef4444' : undefined
+                      borderColor: formErrors.fullname ? '#ef4444' : undefined,
+                      boxShadow: formErrors.fullname ? '0 0 0 1px #ef4444' : undefined
                     }}
                   />
-                  {fullnameError && (
-                    <div style={{ color: '#ef4444', fontSize: 11, marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <span>{fullnameError}</span>
+                  {formErrors.fullname && (
+                    <div style={{ color: '#ef4444', fontSize: 11, marginTop: 4 }}>
+                      {formErrors.fullname}
                     </div>
                   )}
                 </div>
                 <div className="form-group">
                   <label className="form-label">Email</label>
-                  <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="john@example.com" className="form-input" />
+                  <input
+                    type="email"
+                    required
+                    value={email}
+                    onChange={e => {
+                      const val = e.target.value.replace(/\s/g, '');
+                      setEmail(val);
+                      if (formErrors.email) {
+                        setFormErrors(prev => ({ ...prev, email: validateEmail(val) }));
+                      }
+                    }}
+                    placeholder="john@example.com"
+                    className={`form-input ${formErrors.email ? 'border-red-500 focus:ring-red-500' : ''}`}
+                    style={{
+                      borderColor: formErrors.email ? '#ef4444' : undefined,
+                      boxShadow: formErrors.email ? '0 0 0 1px #ef4444' : undefined
+                    }}
+                  />
+                  {formErrors.email && (
+                    <div style={{ color: '#ef4444', fontSize: 11, marginTop: 4 }}>
+                      {formErrors.email}
+                    </div>
+                  )}
                 </div>
                 <div className="form-group">
                   <label className="form-label">Phone</label>
-                  <input type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="+1 555-0100" className="form-input" />
+                  <input
+                    type="tel"
+                    required
+                    value={phone}
+                    onChange={e => {
+                      const filtered = e.target.value.replace(/\D/g, '').slice(0, 10);
+                      setPhone(filtered);
+                      if (formErrors.phone) {
+                        setFormErrors(prev => ({ ...prev, phone: validatePhone(filtered) }));
+                      }
+                    }}
+                    placeholder="9876543210"
+                    className={`form-input ${formErrors.phone ? 'border-red-500 focus:ring-red-500' : ''}`}
+                    style={{
+                      borderColor: formErrors.phone ? '#ef4444' : undefined,
+                      boxShadow: formErrors.phone ? '0 0 0 1px #ef4444' : undefined
+                    }}
+                  />
+                  {formErrors.phone && (
+                    <div style={{ color: '#ef4444', fontSize: 11, marginTop: 4 }}>
+                      {formErrors.phone}
+                    </div>
+                  )}
                 </div>
                 {!isInterviewer && (
                   <div style={{ gridColumn: 'span 2' }}>
@@ -1734,17 +1881,70 @@ export default function App() {
                       onChange={setCandidateRefFace}
                       label="Reference Face Portrait (Anti-Impersonation Lock)"
                     />
+                    {formErrors.refFace && (
+                      <div style={{ color: '#ef4444', fontSize: 11, marginTop: 4 }}>
+                        {formErrors.refFace}
+                      </div>
+                    )}
                   </div>
                 )}
                 {isInterviewer && (
                   <>
                     <div className="form-group">
                       <label className="form-label">Company</label>
-                      <input required value={company} onChange={e => setCompany(e.target.value)} placeholder="Acme Corp" className="form-input" />
+                      <input
+                        required
+                        value={company}
+                        onChange={e => {
+                          let filtered = e.target.value.replace(/[^a-zA-Z\s&.-]/g, '');
+                          if (filtered.length > 0 && !/^[a-zA-Z]/.test(filtered)) {
+                            filtered = filtered.replace(/^[^a-zA-Z]+/, '');
+                          }
+                          setCompany(filtered);
+                          if (formErrors.company) {
+                            setFormErrors(prev => ({ ...prev, company: validateCompany(filtered) }));
+                          }
+                        }}
+                        placeholder="Acme Corp"
+                        className={`form-input ${formErrors.company ? 'border-red-500 focus:ring-red-500' : ''}`}
+                        style={{
+                          borderColor: formErrors.company ? '#ef4444' : undefined,
+                          boxShadow: formErrors.company ? '0 0 0 1px #ef4444' : undefined
+                        }}
+                      />
+                      {formErrors.company && (
+                        <div style={{ color: '#ef4444', fontSize: 11, marginTop: 4 }}>
+                          {formErrors.company}
+                        </div>
+                      )}
                     </div>
                     <div className="form-group">
                       <label className="form-label">Job Title</label>
-                      <input required value={jobTitle} onChange={e => setJobTitle(e.target.value)} placeholder="Staff Engineer" className="form-input" />
+                      <input
+                        required
+                        value={jobTitle}
+                        onChange={e => {
+                          let filtered = e.target.value.replace(/[^a-zA-Z\s/-]/g, '');
+                          if (filtered.length > 0 && !/^[a-zA-Z]/.test(filtered)) {
+                            filtered = filtered.replace(/^[^a-zA-Z]+/, '');
+                          }
+                          setJobTitle(filtered);
+                          if (formErrors.jobTitle) {
+                            setFormErrors(prev => ({ ...prev, jobTitle: validateJobTitle(filtered) }));
+                          }
+                        }}
+                        placeholder="Staff Engineer"
+                        className={`form-input ${formErrors.jobTitle ? 'border-red-500 focus:ring-red-500' : ''}`}
+                        style={{
+                          borderColor: formErrors.jobTitle ? '#ef4444' : undefined,
+                          boxShadow: formErrors.jobTitle ? '0 0 0 1px #ef4444' : undefined
+                        }}
+                      />
+                      {formErrors.jobTitle && (
+                        <div style={{ color: '#ef4444', fontSize: 11, marginTop: 4 }}>
+                          {formErrors.jobTitle}
+                        </div>
+                      )}
                     </div>
                   </>
                 )}
@@ -1758,9 +1958,9 @@ export default function App() {
 
           <div style={{ marginTop: 18, textAlign: 'center', fontSize: 13, color: 'var(--text-secondary)' }}>
             {isRegistering ? (
-              <>Already registered? <button type="button" onClick={() => { setIsRegistering(false); setError(''); setUsernameError(''); setFullnameError(''); }} style={{ background: 'none', border: 'none', color: 'var(--primary)', fontWeight: 600, cursor: 'pointer' }}>Sign In</button></>
+              <>Already registered? <button type="button" onClick={() => { setIsRegistering(false); setError(''); setFormErrors({}); }} style={{ background: 'none', border: 'none', color: 'var(--primary)', fontWeight: 600, cursor: 'pointer' }}>Sign In</button></>
             ) : (
-              <>Need an account? <button type="button" onClick={() => { setIsRegistering(true); setError(''); setUsernameError(''); setFullnameError(''); }} style={{ background: 'none', border: 'none', color: 'var(--primary)', fontWeight: 600, cursor: 'pointer' }}>Register</button></>
+              <>Need an account? <button type="button" onClick={() => { setIsRegistering(true); setError(''); setFormErrors({}); }} style={{ background: 'none', border: 'none', color: 'var(--primary)', fontWeight: 600, cursor: 'pointer' }}>Register</button></>
             )}
           </div>
         </div>
@@ -2120,11 +2320,11 @@ export default function App() {
 
       {/* Add Candidate Modal */}
       {isAddCandidateOpen && (
-        <div className="modal-overlay" onClick={() => { setIsAddCandidateOpen(false); setNewCandidateNameError(''); setNewCandidateFullnameError(''); }}>
+        <div className="modal-overlay" onClick={() => { setIsAddCandidateOpen(false); setCandidateModalErrors({}); setNewCandidateRefFace(null); }}>
           <div className="modal-panel" onClick={e => e.stopPropagation()} style={{ padding: 28 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
               <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>Register New Candidate</h3>
-              <button onClick={() => { setIsAddCandidateOpen(false); setNewCandidateNameError(''); setNewCandidateFullnameError(''); }} className="btn btn-ghost btn-icon btn-sm"><X size={15} /></button>
+              <button onClick={() => { setIsAddCandidateOpen(false); setCandidateModalErrors({}); setNewCandidateRefFace(null); }} className="btn btn-ghost btn-icon btn-sm"><X size={15} /></button>
             </div>
             <form onSubmit={handleCreateCandidate} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div className="form-group">
@@ -2132,26 +2332,28 @@ export default function App() {
                 <input
                   required
                   type="text"
-                  pattern="^[A-Za-z\s.]{2,50}$"
-                  title="Name must contain only alphabets and be at least 2 characters long."
                   value={newCandidateName}
                   onChange={e => {
-                    const filtered = e.target.value.replace(/[^a-zA-Z\s.]/g, '');
+                    let filtered = e.target.value.replace(/[^a-zA-Z0-9_]/g, '');
+                    if (filtered.length > 0 && !/^[a-zA-Z]/.test(filtered)) {
+                      filtered = filtered.replace(/^[^a-zA-Z]+/, '');
+                    }
+                    filtered = filtered.slice(0, 25);
                     setNewCandidateName(filtered);
-                    if (newCandidateNameError && isValidName(filtered)) {
-                      setNewCandidateNameError('');
+                    if (candidateModalErrors.username) {
+                      setCandidateModalErrors(prev => ({ ...prev, username: validateUsername(filtered) }));
                     }
                   }}
-                  placeholder="e.g. Sarah Connor"
-                  className={`form-input ${newCandidateNameError ? 'border-red-500 focus:ring-red-500' : ''}`}
+                  placeholder="e.g. sarah_connor"
+                  className={`form-input ${candidateModalErrors.username ? 'border-red-500 focus:ring-red-500' : ''}`}
                   style={{
-                    borderColor: newCandidateNameError ? '#ef4444' : undefined,
-                    boxShadow: newCandidateNameError ? '0 0 0 1px #ef4444' : undefined
+                    borderColor: candidateModalErrors.username ? '#ef4444' : undefined,
+                    boxShadow: candidateModalErrors.username ? '0 0 0 1px #ef4444' : undefined
                   }}
                 />
-                {newCandidateNameError && (
+                {candidateModalErrors.username && (
                   <div style={{ color: '#ef4444', fontSize: 11, marginTop: 4 }}>
-                    {newCandidateNameError}
+                    {candidateModalErrors.username}
                   </div>
                 )}
               </div>
@@ -2159,40 +2361,104 @@ export default function App() {
                 <label className="form-label">Full Name</label>
                 <input
                   type="text"
-                  pattern="^[A-Za-z\s.]{2,50}$"
-                  title="Name must contain only alphabets and be at least 2 characters long."
                   value={newCandidateFullname}
                   onChange={e => {
                     const filtered = e.target.value.replace(/[^a-zA-Z\s.]/g, '');
                     setNewCandidateFullname(filtered);
-                    if (newCandidateFullnameError && (filtered.trim() === '' || isValidName(filtered))) {
-                      setNewCandidateFullnameError('');
+                    if (candidateModalErrors.fullname) {
+                      setCandidateModalErrors(prev => ({ ...prev, fullname: filtered.trim() ? validateFullName(filtered) : '' }));
                     }
                   }}
                   placeholder="Sarah Connor"
-                  className={`form-input ${newCandidateFullnameError ? 'border-red-500 focus:ring-red-500' : ''}`}
+                  className={`form-input ${candidateModalErrors.fullname ? 'border-red-500 focus:ring-red-500' : ''}`}
                   style={{
-                    borderColor: newCandidateFullnameError ? '#ef4444' : undefined,
-                    boxShadow: newCandidateFullnameError ? '0 0 0 1px #ef4444' : undefined
+                    borderColor: candidateModalErrors.fullname ? '#ef4444' : undefined,
+                    boxShadow: candidateModalErrors.fullname ? '0 0 0 1px #ef4444' : undefined
                   }}
                 />
-                {newCandidateFullnameError && (
+                {candidateModalErrors.fullname && (
                   <div style={{ color: '#ef4444', fontSize: 11, marginTop: 4 }}>
-                    {newCandidateFullnameError}
+                    {candidateModalErrors.fullname}
                   </div>
                 )}
               </div>
               <div className="form-group">
                 <label className="form-label">Email</label>
-                <input type="email" value={newCandidateEmail} onChange={e => setNewCandidateEmail(e.target.value)} placeholder="sarah@example.com" className="form-input" />
+                <input
+                  type="email"
+                  value={newCandidateEmail}
+                  onChange={e => {
+                    const val = e.target.value.replace(/\s/g, '');
+                    setNewCandidateEmail(val);
+                    if (candidateModalErrors.email) {
+                      setCandidateModalErrors(prev => ({ ...prev, email: val.trim() ? validateEmail(val) : '' }));
+                    }
+                  }}
+                  placeholder="sarah@example.com"
+                  className={`form-input ${candidateModalErrors.email ? 'border-red-500 focus:ring-red-500' : ''}`}
+                  style={{
+                    borderColor: candidateModalErrors.email ? '#ef4444' : undefined,
+                    boxShadow: candidateModalErrors.email ? '0 0 0 1px #ef4444' : undefined
+                  }}
+                />
+                {candidateModalErrors.email && (
+                  <div style={{ color: '#ef4444', fontSize: 11, marginTop: 4 }}>
+                    {candidateModalErrors.email}
+                  </div>
+                )}
               </div>
               <div className="form-group">
                 <label className="form-label">Exam Password *</label>
-                <input required minLength={6} type="password" value={newCandidatePass} onChange={e => setNewCandidatePass(e.target.value)} placeholder="At least 6 characters" className="form-input" />
+                <input
+                  required
+                  type="password"
+                  value={newCandidatePass}
+                  onChange={e => {
+                    const val = e.target.value;
+                    setNewCandidatePass(val);
+                    if (candidateModalErrors.password) {
+                      setCandidateModalErrors(prev => ({ ...prev, password: validatePassword(val) }));
+                    }
+                  }}
+                  placeholder="At least 8 characters (letters & numbers)"
+                  className={`form-input ${candidateModalErrors.password ? 'border-red-500 focus:ring-red-500' : ''}`}
+                  style={{
+                    borderColor: candidateModalErrors.password ? '#ef4444' : undefined,
+                    boxShadow: candidateModalErrors.password ? '0 0 0 1px #ef4444' : undefined
+                  }}
+                />
+                {candidateModalErrors.password && (
+                  <div style={{ color: '#ef4444', fontSize: 11, marginTop: 4 }}>
+                    {candidateModalErrors.password}
+                  </div>
+                )}
               </div>
               <div className="form-group">
                 <label className="form-label">Target Job Role</label>
-                <input value={newCandidateJobRole} onChange={e => setNewCandidateJobRole(e.target.value)} placeholder="Senior Software Engineer" className="form-input" />
+                <input
+                  value={newCandidateJobRole}
+                  onChange={e => {
+                    let filtered = e.target.value.replace(/[^a-zA-Z\s/-]/g, '');
+                    if (filtered.length > 0 && !/^[a-zA-Z]/.test(filtered)) {
+                      filtered = filtered.replace(/^[^a-zA-Z]+/, '');
+                    }
+                    setNewCandidateJobRole(filtered);
+                    if (candidateModalErrors.jobRole) {
+                      setCandidateModalErrors(prev => ({ ...prev, jobRole: filtered.trim() ? validateJobTitle(filtered) : '' }));
+                    }
+                  }}
+                  placeholder="Senior Software Engineer"
+                  className={`form-input ${candidateModalErrors.jobRole ? 'border-red-500 focus:ring-red-500' : ''}`}
+                  style={{
+                    borderColor: candidateModalErrors.jobRole ? '#ef4444' : undefined,
+                    boxShadow: candidateModalErrors.jobRole ? '0 0 0 1px #ef4444' : undefined
+                  }}
+                />
+                {candidateModalErrors.jobRole && (
+                  <div style={{ color: '#ef4444', fontSize: 11, marginTop: 4 }}>
+                    {candidateModalErrors.jobRole}
+                  </div>
+                )}
               </div>
               <ReferenceFaceCapture
                 value={newCandidateRefFace}
@@ -2200,7 +2466,7 @@ export default function App() {
                 label="Reference Face Portrait (Optional)"
               />
               <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 12 }}>
-                <button type="button" onClick={() => { setIsAddCandidateOpen(false); setNewCandidateNameError(''); setNewCandidateFullnameError(''); setNewCandidateRefFace(null); }} className="btn btn-secondary">Cancel</button>
+                <button type="button" onClick={() => { setIsAddCandidateOpen(false); setCandidateModalErrors({}); setNewCandidateRefFace(null); }} className="btn btn-secondary">Cancel</button>
                 <button type="submit" className="btn btn-primary"><Plus size={14} /> Register Candidate</button>
               </div>
             </form>

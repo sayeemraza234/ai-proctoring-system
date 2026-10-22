@@ -42,12 +42,13 @@
 
             <div class="field">
                 <label>Username</label>
-                <input id="login-username" type="text" placeholder="Enter your full name" autocomplete="off" spellcheck="false" pattern="^[A-Za-z\s.]{2,50}$" title="Name must contain only alphabets and be at least 2 characters long.">
+                <input id="login-username" type="text" placeholder="e.g. johndoe" autocomplete="off" spellcheck="false" pattern="^[a-zA-Z][a-zA-Z0-9_]{2,24}$" title="Username must start with a letter and be 3–25 characters (letters, numbers, underscores only).">
                 <div id="login-username-error" class="field-error hidden" style="color: #ef4444; font-size: 11px; margin-top: 4px; text-align: left;"></div>
             </div>
             <div class="field">
                 <label>Password</label>
                 <input id="login-password" type="password" placeholder="Enter your password">
+                <div id="login-password-error" class="field-error hidden" style="color: #ef4444; font-size: 11px; margin-top: 4px; text-align: left;"></div>
             </div>
             <button id="login-btn" class="btn-primary" onclick="doLogin()">
                 <span id="login-btn-text">Enter Exam Portal</span>
