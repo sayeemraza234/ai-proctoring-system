@@ -42,7 +42,8 @@
 
             <div class="field">
                 <label>Username</label>
-                <input id="login-username" type="text" placeholder="Enter your username" autocomplete="off" spellcheck="false">
+                <input id="login-username" type="text" placeholder="Enter your full name" autocomplete="off" spellcheck="false" pattern="^[A-Za-z\s.]{2,50}$" title="Name must contain only alphabets and be at least 2 characters long.">
+                <div id="login-username-error" class="field-error hidden" style="color: #ef4444; font-size: 11px; margin-top: 4px; text-align: left;"></div>
             </div>
             <div class="field">
                 <label>Password</label>

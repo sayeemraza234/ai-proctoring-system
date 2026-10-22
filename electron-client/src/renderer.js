@@ -55,10 +55,40 @@ async function doLogin() {
     const btnText  = document.getElementById('login-btn-text');
     const spinner  = document.getElementById('login-spinner');
 
+    const usernameInput = document.getElementById('login-username');
+    const usernameErrorEl = document.getElementById('login-username-error');
+
     if (!username || !password) {
         errBox.textContent = 'Please enter your username and password.';
         errBox.classList.remove('hidden');
         return;
+    }
+
+    const NAME_REGEX = /^[A-Za-z]+(?:[\s.]+[A-Za-z]+)*$/;
+    const isValidName = username.length >= 2 && username.length <= 50 && NAME_REGEX.test(username);
+
+    if (!isValidName) {
+        if (usernameErrorEl) {
+            usernameErrorEl.textContent = 'Please enter a valid name using only alphabets (numbers are not allowed).';
+            usernameErrorEl.classList.remove('hidden');
+        }
+        if (usernameInput) {
+            usernameInput.style.borderColor = '#ef4444';
+            usernameInput.style.boxShadow = '0 0 0 1px #ef4444';
+            usernameInput.focus();
+        }
+        errBox.textContent = 'Please enter a valid name using only alphabets (numbers are not allowed).';
+        errBox.classList.remove('hidden');
+        return;
+    } else {
+        if (usernameErrorEl) {
+            usernameErrorEl.textContent = '';
+            usernameErrorEl.classList.add('hidden');
+        }
+        if (usernameInput) {
+            usernameInput.style.borderColor = '';
+            usernameInput.style.boxShadow = '';
+        }
     }
 
     errBox.classList.add('hidden');
@@ -183,6 +213,27 @@ document.getElementById('login-password').addEventListener('keydown', e => {
 document.getElementById('login-username').addEventListener('keydown', e => {
     if (e.key === 'Enter') document.getElementById('login-password').focus();
 });
+
+// Real-time input constraint: only letters, spaces, and dot
+const loginUsernameInputEl = document.getElementById('login-username');
+if (loginUsernameInputEl) {
+    loginUsernameInputEl.addEventListener('input', (e) => {
+        const filtered = e.target.value.replace(/[^a-zA-Z\s.]/g, '');
+        if (e.target.value !== filtered) {
+            e.target.value = filtered;
+        }
+        const errEl = document.getElementById('login-username-error');
+        if (errEl && !errEl.classList.contains('hidden')) {
+            const trimmed = filtered.trim();
+            if (trimmed.length >= 2 && /^[A-Za-z]+(?:[\s.]+[A-Za-z]+)*$/.test(trimmed)) {
+                errEl.textContent = '';
+                errEl.classList.add('hidden');
+                loginUsernameInputEl.style.borderColor = '';
+                loginUsernameInputEl.style.boxShadow = '';
+            }
+        }
+    });
+}
 
 // ─── SCREEN 2: SYSTEM CHECK ───────────────────────────────────────────────────
 function setCheck(id, state, desc) {

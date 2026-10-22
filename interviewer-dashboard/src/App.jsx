@@ -36,6 +36,14 @@ const formatTimer = (secs) => {
 };
 const formatDate = (d) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
 
+// ── Strict Name Validation (Alphabetic characters, spaces, and dot initials only) ──
+const NAME_REGEX = /^[A-Za-z]+(?:[\s.]+[A-Za-z]+)*$/;
+const isValidName = (name) => {
+  if (!name || typeof name !== 'string') return false;
+  const trimmed = name.trim();
+  return trimmed.length >= 2 && trimmed.length <= 50 && NAME_REGEX.test(trimmed);
+};
+
 // ── Toast Notification ────────────────────────────────────────────────────────
 function Toast({ toasts, removeToast }) {
   return (
@@ -247,6 +255,8 @@ export default function App() {
   const [showPassword, setShowPassword] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
   const [error, setError] = useState('');
+  const [usernameError, setUsernameError] = useState('');
+  const [fullnameError, setFullnameError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isRegistering, setIsRegistering] = useState(false);
   const [fullname, setFullname] = useState('');
@@ -396,7 +406,9 @@ export default function App() {
 
   // Add candidate form
   const [newCandidateName, setNewCandidateName] = useState('');
+  const [newCandidateNameError, setNewCandidateNameError] = useState('');
   const [newCandidateFullname, setNewCandidateFullname] = useState('');
+  const [newCandidateFullnameError, setNewCandidateFullnameError] = useState('');
   const [newCandidateEmail, setNewCandidateEmail] = useState('');
   const [newCandidatePass, setNewCandidatePass] = useState('');
   const [newCandidateJobRole, setNewCandidateJobRole] = useState('Software Engineer');
@@ -598,19 +610,41 @@ export default function App() {
   // ── Auth Handling ──────────────────────────────────────────────────────────
   const handleAuthSubmit = async (e) => {
     e.preventDefault();
-    setError(''); setIsLoading(true);
+    setError('');
+
+    let hasError = false;
+    if (!isValidName(username)) {
+      setUsernameError('Please enter a valid name using only alphabets (numbers are not allowed).');
+      hasError = true;
+    } else {
+      setUsernameError('');
+    }
+
+    if (isRegistering && !isValidName(fullname)) {
+      setFullnameError('Please enter a valid name using only alphabets (numbers are not allowed).');
+      hasError = true;
+    } else {
+      setFullnameError('');
+    }
+
+    if (hasError) {
+      setError('Please enter a valid name using only alphabets (numbers are not allowed).');
+      return;
+    }
+
+    setIsLoading(true);
     try {
       if (isRegistering) {
         const endpoint = loginRole === 'interviewer' ? `${BACKEND}/api/interviewers` : `${BACKEND}/api/candidates`;
         const body = loginRole === 'interviewer'
-          ? { username, password, fullname, email, phone, company, job_title: jobTitle, department, linkedIn }
-          : { username, password, fullname, email, phone };
+          ? { username: username.trim(), password, fullname: fullname.trim(), email, phone, company, job_title: jobTitle, department, linkedIn }
+          : { username: username.trim(), password, fullname: fullname.trim(), email, phone };
         const res = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         if (!res.ok) { const d = await res.json(); setError(d.error || 'Registration failed'); setIsLoading(false); return; }
         const user = await res.json();
         completeLogin(user);
       } else {
-        const res = await fetch(`${BACKEND}/api/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username, password }) });
+        const res = await fetch(`${BACKEND}/api/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: username.trim(), password }) });
         if (!res.ok) { setError('Invalid credentials. Please verify your credentials.'); setIsLoading(false); return; }
         const user = await res.json();
         if (user.role !== loginRole) { setError(`This account is configured as a ${user.role}.`); setIsLoading(false); return; }
@@ -625,6 +659,7 @@ export default function App() {
     setView(user.role);
     setUsername(''); setPassword('');
     setFullname(''); setEmail(''); setCompany(''); setJobTitle('');
+    setUsernameError(''); setFullnameError('');
   };
 
   const handleLogout = () => {
@@ -662,6 +697,27 @@ export default function App() {
   // ── Candidate CRUD ─────────────────────────────────────────────────────────
   const handleCreateCandidate = async (e) => {
     e.preventDefault();
+    let hasError = false;
+
+    if (!isValidName(newCandidateName)) {
+      setNewCandidateNameError('Please enter a valid name using only alphabets (numbers are not allowed).');
+      hasError = true;
+    } else {
+      setNewCandidateNameError('');
+    }
+
+    if (newCandidateFullname.trim() && !isValidName(newCandidateFullname)) {
+      setNewCandidateFullnameError('Please enter a valid name using only alphabets (numbers are not allowed).');
+      hasError = true;
+    } else {
+      setNewCandidateFullnameError('');
+    }
+
+    if (hasError) {
+      addToast('Please enter a valid name using only alphabets (numbers are not allowed).', 'error');
+      return;
+    }
+
     if (newCandidatePass.length < 6) {
       addToast('Password must be at least 6 characters.', 'error');
       return;
@@ -669,7 +725,12 @@ export default function App() {
     try {
       const res = await fetch(`${BACKEND}/api/candidates`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: newCandidateName, password: newCandidatePass, fullname: newCandidateFullname, email: newCandidateEmail })
+        body: JSON.stringify({
+          username: newCandidateName.trim(),
+          password: newCandidatePass,
+          fullname: newCandidateFullname.trim() || newCandidateName.trim(),
+          email: newCandidateEmail
+        })
       });
       if (!res.ok) { const d = await res.json(); addToast(d.error || 'Failed to create candidate', 'error'); return; }
       const candidate = await res.json();
@@ -679,9 +740,10 @@ export default function App() {
         body: JSON.stringify({ candidateId: candidate._id || candidate.id, interviewerId: currentUser?._id, jobRole: newCandidateJobRole, status: 'active' })
       });
 
-      addToast(`Candidate ${newCandidateName} registered`, 'success');
+      addToast(`Candidate ${newCandidateName.trim()} registered`, 'success');
       setIsAddCandidateOpen(false);
       setNewCandidateName(''); setNewCandidateFullname(''); setNewCandidateEmail(''); setNewCandidatePass('');
+      setNewCandidateNameError(''); setNewCandidateFullnameError('');
       fetchCandidates();
     } catch { addToast('Server error while registering candidate', 'error'); }
   };
@@ -1509,7 +1571,7 @@ export default function App() {
         <Toast toasts={toasts} removeToast={removeToast} />
         <div className="card-elevated" style={{ width: '100%', maxWidth: isRegistering && isInterviewer ? 560 : 420, padding: 32, borderRadius: 14 }}>
           <button
-            onClick={() => { setView('landing'); setIsRegistering(false); setError(''); }}
+            onClick={() => { setView('landing'); setIsRegistering(false); setError(''); setUsernameError(''); setFullnameError(''); }}
             className="btn btn-ghost btn-sm"
             style={{ marginBottom: 20, padding: 0 }}
           >
@@ -1533,15 +1595,32 @@ export default function App() {
 
           <form onSubmit={handleAuthSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div className="form-group">
-              <label className="form-label">Username</label>
+              <label className="form-label">{isRegistering ? 'Username / Handle' : 'Username or Full Name'}</label>
               <input
                 type="text"
                 required
+                pattern="^[A-Za-z\s.]{2,50}$"
+                title="Name must contain only alphabets and be at least 2 characters long."
                 value={username}
-                onChange={e => setUsername(e.target.value)}
+                onChange={e => {
+                  const filtered = e.target.value.replace(/[^a-zA-Z\s.]/g, '');
+                  setUsername(filtered);
+                  if (usernameError && isValidName(filtered)) {
+                    setUsernameError('');
+                  }
+                }}
                 placeholder="e.g. johndoe"
-                className="form-input"
+                className={`form-input ${usernameError ? 'border-red-500 focus:ring-red-500' : ''}`}
+                style={{
+                  borderColor: usernameError ? '#ef4444' : undefined,
+                  boxShadow: usernameError ? '0 0 0 1px #ef4444' : undefined
+                }}
               />
+              {usernameError && (
+                <div style={{ color: '#ef4444', fontSize: 11, marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <span>{usernameError}</span>
+                </div>
+              )}
             </div>
 
             <div className="form-group">
@@ -1571,7 +1650,31 @@ export default function App() {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div className="form-group" style={{ gridColumn: 'span 2' }}>
                   <label className="form-label">Full Name</label>
-                  <input required value={fullname} onChange={e => setFullname(e.target.value)} placeholder="John Doe" className="form-input" />
+                  <input
+                    required
+                    type="text"
+                    pattern="^[A-Za-z\s.]{2,50}$"
+                    title="Name must contain only alphabets and be at least 2 characters long."
+                    value={fullname}
+                    onChange={e => {
+                      const filtered = e.target.value.replace(/[^a-zA-Z\s.]/g, '');
+                      setFullname(filtered);
+                      if (fullnameError && isValidName(filtered)) {
+                        setFullnameError('');
+                      }
+                    }}
+                    placeholder="John Doe"
+                    className={`form-input ${fullnameError ? 'border-red-500 focus:ring-red-500' : ''}`}
+                    style={{
+                      borderColor: fullnameError ? '#ef4444' : undefined,
+                      boxShadow: fullnameError ? '0 0 0 1px #ef4444' : undefined
+                    }}
+                  />
+                  {fullnameError && (
+                    <div style={{ color: '#ef4444', fontSize: 11, marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <span>{fullnameError}</span>
+                    </div>
+                  )}
                 </div>
                 <div className="form-group">
                   <label className="form-label">Email</label>
@@ -1603,9 +1706,9 @@ export default function App() {
 
           <div style={{ marginTop: 18, textAlign: 'center', fontSize: 13, color: 'var(--text-secondary)' }}>
             {isRegistering ? (
-              <>Already registered? <button type="button" onClick={() => setIsRegistering(false)} style={{ background: 'none', border: 'none', color: 'var(--primary)', fontWeight: 600, cursor: 'pointer' }}>Sign In</button></>
+              <>Already registered? <button type="button" onClick={() => { setIsRegistering(false); setError(''); setUsernameError(''); setFullnameError(''); }} style={{ background: 'none', border: 'none', color: 'var(--primary)', fontWeight: 600, cursor: 'pointer' }}>Sign In</button></>
             ) : (
-              <>Need an account? <button type="button" onClick={() => setIsRegistering(true)} style={{ background: 'none', border: 'none', color: 'var(--primary)', fontWeight: 600, cursor: 'pointer' }}>Register</button></>
+              <>Need an account? <button type="button" onClick={() => { setIsRegistering(true); setError(''); setUsernameError(''); setFullnameError(''); }} style={{ background: 'none', border: 'none', color: 'var(--primary)', fontWeight: 600, cursor: 'pointer' }}>Register</button></>
             )}
           </div>
         </div>
@@ -1939,20 +2042,67 @@ export default function App() {
 
       {/* Add Candidate Modal */}
       {isAddCandidateOpen && (
-        <div className="modal-overlay" onClick={() => setIsAddCandidateOpen(false)}>
+        <div className="modal-overlay" onClick={() => { setIsAddCandidateOpen(false); setNewCandidateNameError(''); setNewCandidateFullnameError(''); }}>
           <div className="modal-panel" onClick={e => e.stopPropagation()} style={{ padding: 28 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
               <h3 style={{ fontSize: 16, fontWeight: 700, margin: 0, color: 'var(--text-primary)' }}>Register New Candidate</h3>
-              <button onClick={() => setIsAddCandidateOpen(false)} className="btn btn-ghost btn-icon btn-sm"><X size={15} /></button>
+              <button onClick={() => { setIsAddCandidateOpen(false); setNewCandidateNameError(''); setNewCandidateFullnameError(''); }} className="btn btn-ghost btn-icon btn-sm"><X size={15} /></button>
             </div>
             <form onSubmit={handleCreateCandidate} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div className="form-group">
                 <label className="form-label">Username *</label>
-                <input required value={newCandidateName} onChange={e => setNewCandidateName(e.target.value)} placeholder="e.g. sarah_connor" className="form-input" />
+                <input
+                  required
+                  type="text"
+                  pattern="^[A-Za-z\s.]{2,50}$"
+                  title="Name must contain only alphabets and be at least 2 characters long."
+                  value={newCandidateName}
+                  onChange={e => {
+                    const filtered = e.target.value.replace(/[^a-zA-Z\s.]/g, '');
+                    setNewCandidateName(filtered);
+                    if (newCandidateNameError && isValidName(filtered)) {
+                      setNewCandidateNameError('');
+                    }
+                  }}
+                  placeholder="e.g. Sarah Connor"
+                  className={`form-input ${newCandidateNameError ? 'border-red-500 focus:ring-red-500' : ''}`}
+                  style={{
+                    borderColor: newCandidateNameError ? '#ef4444' : undefined,
+                    boxShadow: newCandidateNameError ? '0 0 0 1px #ef4444' : undefined
+                  }}
+                />
+                {newCandidateNameError && (
+                  <div style={{ color: '#ef4444', fontSize: 11, marginTop: 4 }}>
+                    {newCandidateNameError}
+                  </div>
+                )}
               </div>
               <div className="form-group">
                 <label className="form-label">Full Name</label>
-                <input value={newCandidateFullname} onChange={e => setNewCandidateFullname(e.target.value)} placeholder="Sarah Connor" className="form-input" />
+                <input
+                  type="text"
+                  pattern="^[A-Za-z\s.]{2,50}$"
+                  title="Name must contain only alphabets and be at least 2 characters long."
+                  value={newCandidateFullname}
+                  onChange={e => {
+                    const filtered = e.target.value.replace(/[^a-zA-Z\s.]/g, '');
+                    setNewCandidateFullname(filtered);
+                    if (newCandidateFullnameError && (filtered.trim() === '' || isValidName(filtered))) {
+                      setNewCandidateFullnameError('');
+                    }
+                  }}
+                  placeholder="Sarah Connor"
+                  className={`form-input ${newCandidateFullnameError ? 'border-red-500 focus:ring-red-500' : ''}`}
+                  style={{
+                    borderColor: newCandidateFullnameError ? '#ef4444' : undefined,
+                    boxShadow: newCandidateFullnameError ? '0 0 0 1px #ef4444' : undefined
+                  }}
+                />
+                {newCandidateFullnameError && (
+                  <div style={{ color: '#ef4444', fontSize: 11, marginTop: 4 }}>
+                    {newCandidateFullnameError}
+                  </div>
+                )}
               </div>
               <div className="form-group">
                 <label className="form-label">Email</label>
@@ -1967,7 +2117,7 @@ export default function App() {
                 <input value={newCandidateJobRole} onChange={e => setNewCandidateJobRole(e.target.value)} placeholder="Senior Software Engineer" className="form-input" />
               </div>
               <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 12 }}>
-                <button type="button" onClick={() => setIsAddCandidateOpen(false)} className="btn btn-secondary">Cancel</button>
+                <button type="button" onClick={() => { setIsAddCandidateOpen(false); setNewCandidateNameError(''); setNewCandidateFullnameError(''); }} className="btn btn-secondary">Cancel</button>
                 <button type="submit" className="btn btn-primary"><Plus size={14} /> Register Candidate</button>
               </div>
             </form>
