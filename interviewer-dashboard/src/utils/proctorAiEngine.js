@@ -46,6 +46,179 @@ export const PROHIBITED_OBJECT_CLASSES = [
   'laptop'
 ];
 
+// ── Key Facial Landmark Indices for Biometric Geometry & Descriptors ──────
+export const KEY_BIOMETRIC_LANDMARKS = [
+  1,   // Nose tip
+  2,   // Subnasale
+  10,  // Forehead top
+  152, // Chin bottom
+  33,  // Left eye outer
+  133, // Left eye inner
+  263, // Right eye outer
+  362, // Right eye inner
+  61,  // Left mouth corner
+  291, // Right mouth corner
+  0,   // Upper lip top
+  17,  // Lower lip bottom
+  234, // Left ear / jaw tragus
+  454, // Right ear / jaw tragus
+  98,  // Left alar / nostril
+  327, // Right alar / nostril
+  168, // Nose bridge center
+  6,   // Upper nose bridge
+  127, // Left cheekbone
+  356  // Right cheekbone
+];
+
+function calcLandmarkDist(p1, p2) {
+  if (!p1 || !p2) return 0.01;
+  const dx = p1.x - p2.x;
+  const dy = p1.y - p2.y;
+  const dz = (p1.z || 0) - (p2.z || 0);
+  return Math.hypot(dx, dy, dz) || 0.001;
+}
+
+/**
+ * Extracts a normalized 3D facial geometry vector and craniofacial proportion ratios
+ * from 468/478 MediaPipe face landmarks.
+ */
+export function extractFaceDescriptor(landmarks) {
+  if (!landmarks || landmarks.length < 468) return null;
+
+  const leftEyeOuter = landmarks[LANDMARKS.LEFT_EYE_OUTER];
+  const rightEyeOuter = landmarks[LANDMARKS.RIGHT_EYE_OUTER];
+  const noseTip = landmarks[LANDMARKS.NOSE_TIP];
+  const forehead = landmarks[LANDMARKS.FOREHEAD];
+  const chin = landmarks[LANDMARKS.CHIN];
+  const leftMouth = landmarks[LANDMARKS.LEFT_MOUTH_CORNER];
+  const rightMouth = landmarks[LANDMARKS.RIGHT_MOUTH_CORNER];
+  const leftNostril = landmarks[98] || noseTip;
+  const rightNostril = landmarks[327] || noseTip;
+  const leftEar = landmarks[LANDMARKS.LEFT_EAR_TRAGUS];
+  const rightEar = landmarks[LANDMARKS.RIGHT_EAR_TRAGUS];
+
+  // Origin = center between outer eye corners
+  const originX = (leftEyeOuter.x + rightEyeOuter.x) / 2;
+  const originY = (leftEyeOuter.y + rightEyeOuter.y) / 2;
+  const originZ = ((leftEyeOuter.z || 0) + (rightEyeOuter.z || 0)) / 2;
+
+  // Inter-ocular distance (scale normalization factor)
+  const scale = calcLandmarkDist(leftEyeOuter, rightEyeOuter) || 0.1;
+  const faceHeight = calcLandmarkDist(forehead, chin) || 0.2;
+
+  // Normalized 3D points vector
+  const points = [];
+  KEY_BIOMETRIC_LANDMARKS.forEach(idx => {
+    const pt = landmarks[idx] || { x: 0, y: 0, z: 0 };
+    points.push({
+      x: Number(((pt.x - originX) / scale).toFixed(4)),
+      y: Number(((pt.y - originY) / scale).toFixed(4)),
+      z: Number((((pt.z || 0) - originZ) / scale).toFixed(4))
+    });
+  });
+
+  // Craniofacial invariant biometric ratios
+  const ratios = [
+    Number((scale / faceHeight).toFixed(4)),                         // Eye width to face height
+    Number((calcLandmarkDist(leftNostril, rightNostril) / scale).toFixed(4)), // Nose width to eye distance
+    Number((calcLandmarkDist(leftMouth, rightMouth) / scale).toFixed(4)),     // Mouth width to eye distance
+    Number((calcLandmarkDist(noseTip, chin) / faceHeight).toFixed(4)),        // Lower face proportion
+    Number((calcLandmarkDist(forehead, noseTip) / faceHeight).toFixed(4)),    // Upper face proportion
+    Number((calcLandmarkDist(leftEar, rightEar) / scale).toFixed(4)),         // Face width at ears
+    Number((calcLandmarkDist(landmarks[133], landmarks[362]) / scale).toFixed(4)) // Inner eye distance ratio
+  ];
+
+  return { points, ratios };
+}
+
+/**
+ * Computes an Identity Match Confidence Score (0-99%) between two facial descriptors.
+ */
+export function calculateFaceMatchScore(descA, descB) {
+  if (!descA || !descB || !descA.points || !descB.points) return 0;
+
+  // 1. Point-by-point normalized Euclidean distance
+  let totalDist = 0;
+  const n = Math.min(descA.points.length, descB.points.length);
+  if (n === 0) return 0;
+
+  for (let i = 0; i < n; i++) {
+    const pA = descA.points[i];
+    const pB = descB.points[i];
+    const d = Math.hypot(pA.x - pB.x, pA.y - pB.y, (pA.z - pB.z) * 0.5);
+    totalDist += d;
+  }
+  const avgDist = totalDist / n;
+  const distScore = Math.max(0, 1 - (avgDist / 0.25));
+
+  // 2. Craniofacial ratio consistency
+  let ratioDiffSum = 0;
+  const rA = descA.ratios || [];
+  const rB = descB.ratios || [];
+  const count = Math.min(rA.length, rB.length);
+  if (count > 0) {
+    for (let i = 0; i < count; i++) {
+      const maxVal = Math.max(Math.abs(rA[i]), Math.abs(rB[i]), 0.001);
+      ratioDiffSum += Math.abs(rA[i] - rB[i]) / maxVal;
+    }
+  }
+  const ratioScore = count > 0 ? Math.max(0, 1 - (ratioDiffSum / count)) : distScore;
+
+  // 3. Combined weighted confidence (0 - 1)
+  const combined = (distScore * 0.65) + (ratioScore * 0.35);
+  const confidence = Math.round(combined * 100);
+  return Math.min(99, Math.max(5, confidence));
+}
+
+/**
+ * Captures a crisp JPEG snapshot from an active HTMLVideoElement.
+ */
+export function captureVideoSnapshot(videoElement, quality = 0.85) {
+  if (!videoElement || videoElement.readyState < 2 || videoElement.videoWidth === 0) return null;
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.min(videoElement.videoWidth, 640);
+    canvas.height = Math.round(canvas.width * (videoElement.videoHeight / videoElement.videoWidth));
+    const ctx = canvas.getContext('2d');
+    // Mirror horizontally so snapshot matches typical user webcam orientation
+    ctx.translate(canvas.width, 0);
+    ctx.scale(-1, 1);
+    ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL('image/jpeg', quality);
+  } catch (err) {
+    console.warn('[ProctorAI] captureVideoSnapshot failed:', err);
+    return null;
+  }
+}
+
+/**
+ * LocalStorage reference face persistence helpers.
+ */
+export function saveReferenceFace(identifier, faceData) {
+  if (!identifier || !faceData) return;
+  const cleanId = String(identifier).trim().toLowerCase();
+  try {
+    const payload = {
+      ...faceData,
+      enrolledAt: Date.now()
+    };
+    localStorage.setItem(`proctorai_ref_face_${cleanId}`, JSON.stringify(payload));
+  } catch (err) {
+    console.warn('[ProctorAI] Could not save reference face to localStorage:', err);
+  }
+}
+
+export function getReferenceFace(identifier) {
+  if (!identifier) return null;
+  const cleanId = String(identifier).trim().toLowerCase();
+  try {
+    const raw = localStorage.getItem(`proctorai_ref_face_${cleanId}`);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return null;
+}
+
+
 export class ProctorAiEngine {
   constructor(options = {}) {
     this.onViolation = options.onViolation || (() => {});
@@ -61,6 +234,10 @@ export class ProctorAiEngine {
     this.isLoading = false;
     this.initError = null;
 
+    // Biometric Identity Lock Reference
+    this.referenceFace = options.referenceFace || null;
+    this.lastBiometricMatch = null;
+
     // Running state
     this.videoElement = null;
     this.overlayCanvas = null;
@@ -75,7 +252,8 @@ export class ProctorAiEngine {
       consecutiveMultiFace: 0,
       consecutiveGazeAway: 0,
       consecutiveProhibitedObject: {},
-      consecutiveExcessiveMovement: 0
+      consecutiveExcessiveMovement: 0,
+      consecutiveImpersonation: 0
     };
 
     // Cooldown stamps
@@ -93,8 +271,18 @@ export class ProctorAiEngine {
       phone_detected: 0,
       prohibited_material: 0,
       secondary_device: 0,
-      excessive_movement: 0
+      excessive_movement: 0,
+      impersonation_detected: 0
     };
+  }
+
+  /**
+   * Sets or updates the baseline reference face descriptor for biometric authentication.
+   */
+  setReferenceFace(referenceFace) {
+    this.referenceFace = referenceFace;
+    this.temporalState.consecutiveImpersonation = 0;
+    this.lastBiometricMatch = null;
   }
 
   /**
@@ -320,6 +508,34 @@ export class ProctorAiEngine {
         } else {
           this.temporalState.consecutiveGazeAway = Math.max(0, this.temporalState.consecutiveGazeAway - 1);
         }
+
+        // ── Biometric Continuous Identity Lock (Anti-Impersonation) ──
+        if (this.referenceFace && this.referenceFace.descriptor) {
+          const liveDescriptor = extractFaceDescriptor(landmarks);
+          if (liveDescriptor) {
+            const matchScore = calculateFaceMatchScore(this.referenceFace.descriptor, liveDescriptor);
+            this.lastBiometricMatch = {
+              score: matchScore,
+              isVerified: matchScore >= 75,
+              timestamp: now
+            };
+
+            if (matchScore < 75) {
+              this.temporalState.consecutiveImpersonation = (this.temporalState.consecutiveImpersonation || 0) + 1;
+              if (this.temporalState.consecutiveImpersonation >= 3) {
+                this.triggerViolation(
+                  'impersonation_detected',
+                  'high',
+                  `BIOMETRIC MISMATCH: Face does not match registered candidate profile (Match: ${matchScore}%). Possible impersonation!`,
+                  0.95,
+                  20
+                );
+              }
+            } else {
+              this.temporalState.consecutiveImpersonation = Math.max(0, (this.temporalState.consecutiveImpersonation || 0) - 1);
+            }
+          }
+        }
       }
 
       // ── 2. PROHIBITED OBJECT DETECTION (COCO-SSD) ──────────────────────────
@@ -369,6 +585,7 @@ export class ProctorAiEngine {
         faceDetected: numFaces > 0,
         headPose,
         detectedObjects,
+        biometricMatch: this.lastBiometricMatch,
         violations: { ...this.violationCounts },
         status: statusSummary
       });
@@ -580,6 +797,9 @@ export class ProctorAiEngine {
    * Generates a concise status summary for the HUD pill.
    */
   computeStatusSummary({ numFaces, headPose, detectedObjects, faceAbsent, multiFace, lookingAway, excessiveMovement }) {
+    if (this.lastBiometricMatch && !this.lastBiometricMatch.isVerified && (this.temporalState.consecutiveImpersonation || 0) >= 2) {
+      return { level: 'danger', text: `Identity Mismatch (${this.lastBiometricMatch.score}% Match)` };
+    }
     if (faceAbsent) {
       return { level: 'danger', text: 'Face Absent from View' };
     }
@@ -595,6 +815,9 @@ export class ProctorAiEngine {
     }
     if (excessiveMovement) {
       return { level: 'warning', text: 'Excessive Head Movement' };
+    }
+    if (this.lastBiometricMatch && this.lastBiometricMatch.isVerified) {
+      return { level: 'normal', text: `Identity Verified (${this.lastBiometricMatch.score}%)` };
     }
     if (headPose) {
       return { level: 'normal', text: `Active: Face Tracked (${headPose.directionLabel})` };
@@ -674,6 +897,43 @@ export class ProctorAiEngine {
   }
 
   /**
+   * Evaluates a single video frame on demand to verify exactly 1 forward-facing face
+   * and extracts its biometric descriptor. Useful for Registration & Identity Gates.
+   */
+  detectSingleFaceFromVideo(video) {
+    if (!this.faceLandmarker || !video || video.readyState < 2 || video.videoWidth === 0) {
+      return { success: false, count: 0, error: 'Webcam feed not ready' };
+    }
+    try {
+      const results = this.faceLandmarker.detectForVideo(video, performance.now());
+      const count = (results && results.faceLandmarks) ? results.faceLandmarks.length : 0;
+      if (count === 0) {
+        return { success: false, count: 0, error: 'No face detected in camera frame. Please center your face in the guide.' };
+      }
+      if (count > 1) {
+        return { success: false, count, error: `Multiple faces (${count}) detected in frame. Only the candidate must be visible.` };
+      }
+      const landmarks = results.faceLandmarks[0];
+      const headPose = this.calculateHeadPose(landmarks);
+      if (headPose.isLookingAway) {
+        return { success: false, count: 1, headPose, error: `Please look directly forward at the camera (${headPose.directionLabel}).` };
+      }
+      const descriptor = extractFaceDescriptor(landmarks);
+      return {
+        success: true,
+        count: 1,
+        landmarks,
+        headPose,
+        descriptor,
+        error: null
+      };
+    } catch (err) {
+      console.warn('[ProctorAI] detectSingleFaceFromVideo error:', err);
+      return { success: false, count: 0, error: 'Vision detection error. Please try again.' };
+    }
+  }
+
+  /**
    * Destroys all loaded models and resources.
    */
   destroy() {
@@ -689,3 +949,27 @@ export class ProctorAiEngine {
     this.isLoading = false;
   }
 }
+
+// ── Shared Vision Engine Singleton ─────────────────────────────────────────
+let sharedVisionEngineInstance = null;
+let sharedVisionEnginePromise = null;
+
+export async function getSharedVisionEngine() {
+  if (sharedVisionEngineInstance && sharedVisionEngineInstance.isInitialized) {
+    return sharedVisionEngineInstance;
+  }
+  if (!sharedVisionEnginePromise) {
+    sharedVisionEnginePromise = (async () => {
+      const engine = new ProctorAiEngine();
+      const ok = await engine.initialize();
+      if (ok) {
+        sharedVisionEngineInstance = engine;
+        return engine;
+      }
+      sharedVisionEnginePromise = null;
+      return null;
+    })();
+  }
+  return sharedVisionEnginePromise;
+}
+

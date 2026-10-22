@@ -16,6 +16,9 @@ import AlertsPanel from './components/AlertsPanel';
 import ReportView from './components/ReportView';
 import CandidateExamKiosk from './components/CandidateExamKiosk';
 import LiveMonitoringView from './components/LiveMonitoringView';
+import ReferenceFaceCapture from './components/ReferenceFaceCapture';
+import BiometricVerificationGate from './components/BiometricVerificationGate';
+import { saveReferenceFace, getReferenceFace } from './utils/proctorAiEngine';
 import { io } from 'socket.io-client';
 
 const BACKEND = (() => {
@@ -267,6 +270,11 @@ export default function App() {
   const [department, setDepartment] = useState('');
   const [linkedIn, setLinkedIn] = useState('');
 
+  // Biometric anti-impersonation state
+  const [candidateRefFace, setCandidateRefFace] = useState(null);
+  const [newCandidateRefFace, setNewCandidateRefFace] = useState(null);
+  const [verifiedBiometricRef, setVerifiedBiometricRef] = useState(null);
+
   // Sidebar collapsed state & profile menu popover
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => {
     try { return localStorage.getItem('sidebar_collapsed') === 'true'; } catch { return false; }
@@ -508,7 +516,12 @@ export default function App() {
         interview_id: params.get('interview') || params.get('interviewId')
       });
       const isKiosk = viewParam === 'candidate_kiosk' || params.get('kiosk') === 'true' || viewParam === 'kiosk';
-      setView(isKiosk ? 'candidate_kiosk' : 'candidate');
+      const isBioVerified = sessionStorage.getItem('proctorai_bio_verified_' + (userParam || 'Candidate'));
+      if (isKiosk && isBioVerified !== 'true') {
+        setView('biometric_gate');
+      } else {
+        setView(isKiosk ? 'candidate_kiosk' : 'candidate');
+      }
     }
   }, []);
 
@@ -632,6 +645,13 @@ export default function App() {
       return;
     }
 
+    if (isRegistering && loginRole === 'candidate') {
+      if (!candidateRefFace || !candidateRefFace.snapshot) {
+        setError('Please capture your reference face portrait to complete registration.');
+        return;
+      }
+    }
+
     setIsLoading(true);
     try {
       if (isRegistering) {
@@ -642,6 +662,15 @@ export default function App() {
         const res = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
         if (!res.ok) { const d = await res.json(); setError(d.error || 'Registration failed'); setIsLoading(false); return; }
         const user = await res.json();
+
+        // Persist biometric reference face for candidate
+        if (candidateRefFace) {
+          saveReferenceFace(username.trim(), candidateRefFace);
+          if (email.trim()) saveReferenceFace(email.trim(), candidateRefFace);
+          if (user._id) saveReferenceFace(user._id, candidateRefFace);
+          setVerifiedBiometricRef(candidateRefFace);
+        }
+
         completeLogin(user);
       } else {
         const res = await fetch(`${BACKEND}/api/login`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: username.trim(), password }) });
@@ -656,10 +685,20 @@ export default function App() {
 
   const completeLogin = (user) => {
     setCurrentUser(user);
-    setView(user.role);
+    if (user.role === 'candidate') {
+      const isVerified = sessionStorage.getItem('proctorai_bio_verified_' + (user.username || ''));
+      if (isVerified === 'true') {
+        setView('candidate');
+      } else {
+        setView('biometric_gate');
+      }
+    } else {
+      setView(user.role);
+    }
     setUsername(''); setPassword('');
     setFullname(''); setEmail(''); setCompany(''); setJobTitle('');
     setUsernameError(''); setFullnameError('');
+    setCandidateRefFace(null);
   };
 
   const handleLogout = () => {
@@ -741,9 +780,13 @@ export default function App() {
       });
 
       addToast(`Candidate ${newCandidateName.trim()} registered`, 'success');
+      if (newCandidateRefFace) {
+        saveReferenceFace(newCandidateName.trim(), newCandidateRefFace);
+        if (newCandidateEmail.trim()) saveReferenceFace(newCandidateEmail.trim(), newCandidateRefFace);
+      }
       setIsAddCandidateOpen(false);
       setNewCandidateName(''); setNewCandidateFullname(''); setNewCandidateEmail(''); setNewCandidatePass('');
-      setNewCandidateNameError(''); setNewCandidateFullnameError('');
+      setNewCandidateNameError(''); setNewCandidateFullnameError(''); setNewCandidateRefFace(null);
       fetchCandidates();
     } catch { addToast('Server error while registering candidate', 'error'); }
   };
@@ -1684,6 +1727,15 @@ export default function App() {
                   <label className="form-label">Phone</label>
                   <input type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="+1 555-0100" className="form-input" />
                 </div>
+                {!isInterviewer && (
+                  <div style={{ gridColumn: 'span 2' }}>
+                    <ReferenceFaceCapture
+                      value={candidateRefFace}
+                      onChange={setCandidateRefFace}
+                      label="Reference Face Portrait (Anti-Impersonation Lock)"
+                    />
+                  </div>
+                )}
                 {isInterviewer && (
                   <>
                     <div className="form-group">
@@ -1717,12 +1769,31 @@ export default function App() {
   }
 
   // ══════════════════════════════════════════════════════════════════════
+  // RENDER: BIOMETRIC FACE VERIFICATION GATE
+  // ══════════════════════════════════════════════════════════════════════
+  if (view === 'biometric_gate') {
+    return (
+      <BiometricVerificationGate
+        currentUser={currentUser}
+        onVerified={(refFace) => {
+          setVerifiedBiometricRef(refFace);
+          sessionStorage.setItem('proctorai_bio_verified_' + (currentUser?.username || ''), 'true');
+          setView('candidate_kiosk');
+        }}
+        onBack={() => setView('candidate')}
+        onLogout={handleLogout}
+      />
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════
   // RENDER: IN-BROWSER SECURE KIOSK ASSESSMENT SESSION
   // ══════════════════════════════════════════════════════════════════════
   if (view === 'candidate_kiosk') {
     return (
       <CandidateExamKiosk
         currentUser={currentUser}
+        referenceFace={verifiedBiometricRef || getReferenceFace(currentUser?.username) || getReferenceFace(currentUser?.email)}
         onExit={() => {
           setLaunchStatus('idle');
           setView('candidate');
@@ -1805,7 +1876,14 @@ export default function App() {
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12, width: '100%' }}>
               <button
-                onClick={() => setView('candidate_kiosk')}
+                onClick={() => {
+                  const isVerified = sessionStorage.getItem('proctorai_bio_verified_' + (currentUser?.username || ''));
+                  if (isVerified === 'true') {
+                    setView('candidate_kiosk');
+                  } else {
+                    setView('biometric_gate');
+                  }
+                }}
                 className="btn btn-primary w-full"
                 style={{ width: '100%', background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', color: '#fff' }}
               >
@@ -2116,8 +2194,13 @@ export default function App() {
                 <label className="form-label">Target Job Role</label>
                 <input value={newCandidateJobRole} onChange={e => setNewCandidateJobRole(e.target.value)} placeholder="Senior Software Engineer" className="form-input" />
               </div>
+              <ReferenceFaceCapture
+                value={newCandidateRefFace}
+                onChange={setNewCandidateRefFace}
+                label="Reference Face Portrait (Optional)"
+              />
               <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 12 }}>
-                <button type="button" onClick={() => { setIsAddCandidateOpen(false); setNewCandidateNameError(''); setNewCandidateFullnameError(''); }} className="btn btn-secondary">Cancel</button>
+                <button type="button" onClick={() => { setIsAddCandidateOpen(false); setNewCandidateNameError(''); setNewCandidateFullnameError(''); setNewCandidateRefFace(null); }} className="btn btn-secondary">Cancel</button>
                 <button type="submit" className="btn btn-primary"><Plus size={14} /> Register Candidate</button>
               </div>
             </form>

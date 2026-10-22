@@ -7,7 +7,7 @@ import {
   ChevronRight, ChevronLeft, Eye, EyeOff, Award, Check, Sparkles,
   Activity, Sliders, Cpu, Radio, Users, Volume2, Video
 } from 'lucide-react';
-import { ProctorAiEngine } from '../utils/proctorAiEngine';
+import { ProctorAiEngine, getReferenceFace } from '../utils/proctorAiEngine';
 
 const BACKEND = (() => {
   if (import.meta.env.VITE_BACKEND_URL) return import.meta.env.VITE_BACKEND_URL;
@@ -27,9 +27,10 @@ const rtcConfig = {
   ]
 };
 
-export default function CandidateExamKiosk({ currentUser, onExit }) {
+export default function CandidateExamKiosk({ currentUser, onExit, referenceFace }) {
   // ── Session State ──────────────────────────────────────────────────────────
   const interviewId = currentUser?.interview_id || currentUser?.interviewId || currentUser?._id;
+  const activeRefFace = referenceFace || getReferenceFace(currentUser?.username) || getReferenceFace(currentUser?.email) || getReferenceFace(currentUser?._id);
   const [questions, setQuestions] = useState(currentUser?.questions || []);
   const [currentQIndex, setCurrentQIndex] = useState(0);
   const [answers, setAnswers] = useState({});
@@ -567,6 +568,7 @@ export default function CandidateExamKiosk({ currentUser, onExit }) {
     const engine = new ProctorAiEngine({
       cooldownMs: 4000,
       detectionIntervalMs: 250,
+      referenceFace: activeRefFace,
       onStatusChange: (statusObj) => {
         setAiLoading(statusObj);
       },
@@ -879,6 +881,27 @@ export default function CandidateExamKiosk({ currentUser, onExit }) {
             <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#6366f1', boxShadow: '0 0 8px #6366f1' }} />
             IN-BROWSER SECURE KIOSK
           </div>
+          {/* Biometric Anti-Impersonation ID Badge */}
+          {(() => {
+            const isBiometricMismatch = (aiTelemetry.biometricMatch && !aiTelemetry.biometricMatch.isVerified) || violations.some(v => v.type === 'impersonation_detected');
+            return (
+              <div
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6, padding: '4px 10px',
+                  borderRadius: 20,
+                  background: isBiometricMismatch ? 'rgba(239, 68, 68, 0.2)' : 'rgba(16, 185, 129, 0.15)',
+                  border: `1px solid ${isBiometricMismatch ? 'rgba(239, 68, 68, 0.4)' : 'rgba(16, 185, 129, 0.3)'}`,
+                  fontSize: 11, fontWeight: 700,
+                  color: isBiometricMismatch ? '#ef4444' : '#10b981',
+                  letterSpacing: '0.04em'
+                }}
+                title={isBiometricMismatch ? 'Warning: Identity Mismatch Detected!' : 'Continuous Biometric Anti-Impersonation Lock Active'}
+              >
+                <Shield size={12} style={{ color: isBiometricMismatch ? '#ef4444' : '#10b981' }} />
+                <span>{isBiometricMismatch ? 'BIOMETRIC ID: MISMATCH' : 'BIOMETRIC ID: VERIFIED'}</span>
+              </div>
+            );
+          })()}
           {!isFullscreen && (
             <button
               onClick={ensureFullscreen}
@@ -1127,6 +1150,23 @@ export default function CandidateExamKiosk({ currentUser, onExit }) {
           >
             ×
           </button>
+        </div>
+      )}
+
+      {/* ── BIOMETRIC IDENTITY MISMATCH MALPRACTICE BANNER ───────────────── */}
+      {((aiTelemetry.biometricMatch && !aiTelemetry.biometricMatch.isVerified) || violations.some(v => v.type === 'impersonation_detected')) && (
+        <div style={{
+          background: 'linear-gradient(90deg, #991b1b 0%, #dc2626 100%)',
+          color: '#ffffff', padding: '10px 20px',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          fontSize: 13, fontWeight: 700, borderBottom: '2px solid #7f1d1d', zIndex: 96
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <AlertTriangle size={18} />
+            <span>
+              <strong>CRITICAL SECURITY ALERT:</strong> IDENTITY MISMATCH / IMPERSONATION DETECTED. Live face geometry does not match registered candidate biometric profile (-20 pts trust penalty).
+            </span>
+          </div>
         </div>
       )}
 
