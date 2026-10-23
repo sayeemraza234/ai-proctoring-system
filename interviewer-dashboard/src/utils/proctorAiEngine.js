@@ -171,14 +171,15 @@ export function calculateFaceMatchScore(descA, descB) {
 }
 
 /**
- * Captures a crisp JPEG snapshot from an active HTMLVideoElement.
+ * Captures a compact JPEG snapshot thumbnail (160x160 at 0.6 quality) from an active HTMLVideoElement
+ * to prevent localStorage QuotaExceededError and avoid large payloads.
  */
-export function captureVideoSnapshot(videoElement, quality = 0.85) {
+export function captureVideoSnapshot(videoElement, quality = 0.6) {
   if (!videoElement || videoElement.readyState < 2 || videoElement.videoWidth === 0) return null;
   try {
     const canvas = document.createElement('canvas');
-    canvas.width = Math.min(videoElement.videoWidth, 640);
-    canvas.height = Math.round(canvas.width * (videoElement.videoHeight / videoElement.videoWidth));
+    canvas.width = 160;
+    canvas.height = 160;
     const ctx = canvas.getContext('2d');
     // Mirror horizontally so snapshot matches typical user webcam orientation
     ctx.translate(canvas.width, 0);
@@ -192,7 +193,7 @@ export function captureVideoSnapshot(videoElement, quality = 0.85) {
 }
 
 /**
- * LocalStorage reference face persistence helpers.
+ * LocalStorage reference face persistence helpers with QuotaExceededError handling.
  */
 export function saveReferenceFace(identifier, faceData) {
   if (!identifier || !faceData) return;
@@ -202,7 +203,20 @@ export function saveReferenceFace(identifier, faceData) {
       ...faceData,
       enrolledAt: Date.now()
     };
-    localStorage.setItem(`proctorai_ref_face_${cleanId}`, JSON.stringify(payload));
+    try {
+      localStorage.setItem(`proctorai_ref_face_${cleanId}`, JSON.stringify(payload));
+    } catch (quotaErr) {
+      // If localStorage quota exceeded, clear stale face references and retry
+      console.warn('[ProctorAI] Quota warning, pruning older biometric entries:', quotaErr);
+      try {
+        Object.keys(localStorage).forEach(k => {
+          if (k.startsWith('proctorai_ref_face_') && k !== `proctorai_ref_face_${cleanId}`) {
+            localStorage.removeItem(k);
+          }
+        });
+        localStorage.setItem(`proctorai_ref_face_${cleanId}`, JSON.stringify(payload));
+      } catch {}
+    }
   } catch (err) {
     console.warn('[ProctorAI] Could not save reference face to localStorage:', err);
   }

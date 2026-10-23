@@ -179,14 +179,34 @@ export default function ReferenceFaceCapture({ value, onChange, label = 'Referen
             }
           }
 
+          // Generate 160x160 thumbnail to prevent localStorage quota crash
+          let snapshotThumb = dataUrl;
+          try {
+            const thumbCanvas = document.createElement('canvas');
+            thumbCanvas.width = 160;
+            thumbCanvas.height = 160;
+            const tCtx = thumbCanvas.getContext('2d');
+            tCtx.drawImage(img, 0, 0, 160, 160);
+            snapshotThumb = thumbCanvas.toDataURL('image/jpeg', 0.6);
+          } catch {}
+
           onChange({
-            snapshot: dataUrl,
+            snapshot: snapshotThumb,
             descriptor,
             timestamp: Date.now()
           });
         } catch {
+          let snapshotThumb = dataUrl;
+          try {
+            const thumbCanvas = document.createElement('canvas');
+            thumbCanvas.width = 160;
+            thumbCanvas.height = 160;
+            const tCtx = thumbCanvas.getContext('2d');
+            tCtx.drawImage(img, 0, 0, 160, 160);
+            snapshotThumb = thumbCanvas.toDataURL('image/jpeg', 0.6);
+          } catch {}
           onChange({
-            snapshot: dataUrl,
+            snapshot: snapshotThumb,
             descriptor: null,
             timestamp: Date.now()
           });
